@@ -81,4 +81,3 @@ export default function App() {
     </div>
   );
 }
-// 練習用コメント
