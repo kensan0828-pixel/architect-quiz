@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>建築士試験 問題登録ツール</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap');
+
+    :root {
+      --bg: #f5f4f0;
+      --surface: #ffffff;
+      --border: #e2e0da;
+      --text: #1a1916;
+      --muted: #7a7870;
+      --accent: #2d5be3;
+      --accent-light: #e8edfc;
+      --success: #16a34a;
+      --success-light: #f0fdf4;
+      --error: #dc2626;
+      --error-light: #fef2f2;
+      --warning: #d97706;
+      --warning-light: #fffbeb;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Noto Sans JP', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 32px 16px 80px;
+    }
+
+    .container { max-width: 860px; margin: 0 auto; }
+
+    header {
+      margin-bottom: 40px;
+    }
+    header h1 {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    header p {
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 16px;
+    }
+
+    .step-label {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .step-num {
+      width: 28px; height: 28px;
+      background: var(--text);
+      color: #fff;
+      border-radius: 50%;
+      font-size: 13px;
+      font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .step-num.done { background: var(--success); }
+    .step-title { font-size: 15px; font-weight: 700; }
+
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 6px;
+    }
+
+    input[type="text"], input[type="password"], select {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      background: var(--bg);
+      color: var(--text);
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input[type="text"]:focus, input[type="password"]:focus {
+      border-color: var(--accent);
+    }
+
+    .upload-zone {
+      border: 2px dashed var(--border);
+      border-radius: 10px;
+      padding: 40px 24px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      background: var(--bg);
+    }
+    .upload-zone:hover, .upload-zone.drag-over {
+      border-color: var(--accent);
+      background: var(--accent-light);
+    }
+    .upload-zone.has-file {
+      border-style: solid;
+      border-color: var(--success);
+      background: var(--success-light);
+    }
+    .upload-icon { font-size: 36px; margin-bottom: 8px; }
+    .upload-text { font-size: 14px; font-weight: 500; }
+    .upload-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+    input[type="file"] { display: none; }
+
+    .row { display: flex; gap: 12px; }
+    .col { flex: 1; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 700;
+      font-family: 'Noto Sans JP', sans-serif;
+      cursor: pointer;
+      border: none;
+      transition: all 0.15s;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+    .btn-primary:hover:not(:disabled) { background: #1e45c5; }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-success {
+      background: var(--success);
+      color: #fff;
+    }
+    .btn-success:hover:not(:disabled) { background: #15803d; }
+    .btn-success:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-outline {
+      background: transparent;
+      color: var(--text);
+      border: 1.5px solid var(--border);
+    }
+    .btn-outline:hover { border-color: var(--text); }
+    .btn-sm { padding: 5px 12px; font-size: 12px; }
+
+    .alert {
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      margin-top: 12px;
+      display: none;
+    }
+    .alert.show { display: flex; align-items: flex-start; gap: 8px; }
+    .alert-info { background: var(--accent-light); color: var(--accent); }
+    .alert-success { background: var(--success-light); color: var(--success); }
+    .alert-error { background: var(--error-light); color: var(--error); }
+    .alert-warning { background: var(--warning-light); color: var(--warning); }
+
+    .progress-bar-wrap {
+      height: 6px;
+      background: var(--border);
+      border-radius: 99px;
+      overflow: hidden;
+      margin-top: 12px;
+      display: none;
+    }
+    .progress-bar-wrap.show { display: block; }
+    .progress-bar {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 99px;
+      transition: width 0.3s;
+      width: 0%;
+    }
+    .progress-bar.animate {
+      animation: indeterminate 1.2s ease infinite;
+    }
+    @keyframes indeterminate {
+      0% { transform: translateX(-100%); width: 60%; }
+      100% { transform: translateX(200%); width: 60%; }
+    }
+
+    /* Preview Table */
+    .preview-section { display: none; }
+    .preview-section.show { display: block; }
+
+    .preview-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .preview-count {
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .question-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .q-card {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .q-card-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+    }
+    .q-num {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      font-size: 13px;
+      color: var(--accent);
+    }
+    .q-tag {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 99px;
+      background: var(--accent-light);
+      color: var(--accent);
+      font-weight: 700;
+    }
+    .q-card-body { padding: 14px; }
+    .q-text { font-size: 13px; line-height: 1.7; margin-bottom: 10px; color: var(--text); }
+    .q-choices {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+    .q-choice {
+      font-size: 12px;
+      padding: 6px 10px;
+      background: var(--bg);
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      line-height: 1.5;
+    }
+    .q-choice.correct {
+      background: var(--success-light);
+      border-color: #bbf7d0;
+      color: var(--success);
+      font-weight: 700;
+    }
+    .q-answer {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .q-answer span { font-weight: 700; color: var(--success); }
+
+    .edit-btn {
+      margin-left: auto;
+      font-size: 11px;
+    }
+
+    /* Register results */
+    .result-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-height: 300px;
+      overflow-y: auto;
+      margin-top: 12px;
+    }
+    .result-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      padding: 6px 10px;
+      border-radius: 6px;
+      background: var(--bg);
+    }
+    .result-ok { color: var(--success); }
+    .result-ng { color: var(--error); }
+
+    .divider {
+      height: 1px;
+      background: var(--border);
+      margin: 20px 0;
+    }
+
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+
+    .spinner {
+      display: inline-block;
+      width: 16px; height: 16px;
+      border: 2px solid rgba(255,255,255,0.4);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .badge-success {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: var(--success-light);
+      color: var(--success);
+      font-size: 12px; font-weight: 700;
+      padding: 3px 10px; border-radius: 99px;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <h1>📐 建築士試験 問題登録ツール</h1>
+    <p>PDFをGeminiで解析 → Notionに一括登録</p>
+  </header>
+
+  <!-- Step 1: 設定 -->
+  <div class="card">
+    <div class="step-label">
+      <div class="step-num" id="step1-num">1</div>
+      <div class="step-title">API設定</div>
+    </div>
+
+    <div style="margin-bottom:16px">
+      <label>Gemini API キー</label>
+      <input type="password" id="gemini-key" placeholder="AIza..." autocomplete="off">
+    </div>
+
+    <div class="row">
+      <div class="col">
+        <label>科目</label>
+        <select id="subject">
+          <option value="学科Ⅰ（計画）">学科Ⅰ（計画）</option>
+          <option value="学科Ⅱ（環境・設備）" selected>学科Ⅱ（環境・設備）</option>
+          <option value="学科Ⅲ（法規）">学科Ⅲ（法規）</option>
+          <option value="学科Ⅳ（構造）">学科Ⅳ（構造）</option>
+          <option value="学科Ⅴ（施工）">学科Ⅴ（施工）</option>
+        </select>
+      </div>
+      <div class="col">
+        <label>年度</label>
+        <select id="year">
+          <option value="令和7年" selected>令和7年</option>
+          <option value="令和6年">令和6年</option>
+          <option value="令和5年">令和5年</option>
+          <option value="令和4年">令和4年</option>
+          <option value="令和3年">令和3年</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="alert alert-info show" style="margin-top:14px">
+      ℹ️ GeminiキーはこのページのみでGoogleのAPIに直接送信します。サーバーには保存されません。
+    </div>
+  </div>
+
+  <!-- Step 2: PDF -->
+  <div class="card">
+    <div class="step-label">
+      <div class="step-num" id="step2-num">2</div>
+      <div class="step-title">PDFをアップロード</div>
+    </div>
+
+    <div class="upload-zone" id="upload-zone" onclick="document.getElementById('pdf-input').click()">
+      <div class="upload-icon" id="upload-icon">📄</div>
+      <div class="upload-text" id="upload-text">クリックまたはドラッグ＆ドロップ</div>
+      <div class="upload-sub" id="upload-sub">PDF形式 · 最大50MB</div>
+    </div>
+    <input type="file" id="pdf-input" accept=".pdf">
+
+    <pre id="raw-response" style="display:none;margin-top:12px;padding:12px;background:#1a1916;color:#a3e635;border-radius:8px;font-size:11px;font-family:'JetBrains Mono',monospace;overflow:auto;max-height:200px;white-space:pre-wrap;"></pre>
+
+    <div class="actions">
+      <button class="btn btn-primary" id="parse-btn" onclick="parsePDF()" disabled>
+        ✨ Geminiで解析する
+      </button>
+    </div>
+
+    <div class="progress-bar-wrap" id="parse-progress">
+      <div class="progress-bar animate" id="parse-bar"></div>
+    </div>
+    <div class="alert" id="parse-alert"></div>
+  </div>
+
+  <!-- Step 3: 正答PDF -->
+  <div class="card answer-section" id="answer-section" style="display:none">
+    <div class="step-label">
+      <div class="step-num" id="step3-num">3</div>
+      <div class="step-title">正答PDFをアップロード</div>
+    </div>
+
+    <div class="upload-zone" id="upload-zone-ans" onclick="document.getElementById('ans-input').click()">
+      <div class="upload-icon" id="upload-icon-ans">📋</div>
+      <div class="upload-text" id="upload-text-ans">正答一覧PDFをクリックまたはドラッグ＆ドロップ</div>
+      <div class="upload-sub" id="upload-sub-ans">複数科目まとめて記載されているPDFでもOK</div>
+    </div>
+    <input type="file" id="ans-input" accept=".pdf">
+
+    <div class="actions">
+      <button class="btn btn-primary" id="ans-btn" onclick="parseAnswerPDF()" disabled>
+        🔑 正答を読み取る
+      </button>
+      <button class="btn btn-outline" onclick="skipAnswers()">
+        スキップ（後で手入力）
+      </button>
+    </div>
+
+    <div class="progress-bar-wrap" id="ans-progress">
+      <div class="progress-bar animate"></div>
+    </div>
+    <div class="alert" id="ans-alert"></div>
+  </div>
+
+  <!-- Step 4: プレビュー -->
+  <div class="card preview-section" id="preview-section">
+    <div class="step-label">
+      <div class="step-num done">4</div>
+      <div class="step-title">解析結果を確認</div>
+    </div>
+
+    <div class="preview-header">
+      <div class="preview-count" id="preview-count"></div>
+      <button class="btn btn-outline btn-sm" onclick="parsePDF()">🔄 再解析</button>
+    </div>
+
+    <div class="question-list" id="question-list"></div>
+
+    <div class="divider"></div>
+
+    <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px">
+      <div>
+        <div style="font-size:13px; font-weight:700; margin-bottom:2px">Notionに一括登録</div>
+        <div style="font-size:12px; color:var(--muted)">バックエンド（localhost:8000）が起動している必要があります</div>
+      </div>
+      <button class="btn btn-success" id="register-btn" onclick="registerToNotion()">
+        📥 Notionに登録する
+      </button>
+    </div>
+
+    <div class="progress-bar-wrap" id="reg-progress">
+      <div class="progress-bar" id="reg-bar"></div>
+    </div>
+    <div class="alert" id="reg-alert"></div>
+    <div class="result-list" id="result-list"></div>
+  </div>
+
+</div>
+
+<script>
+  let pdfBase64 = null;
+  let parsedQuestions = [];
+  let answerPdfBase64 = null;
+
+  // ── ファイル選択
+  const pdfInput = document.getElementById('pdf-input');
+  const uploadZone = document.getElementById('upload-zone');
+
+  pdfInput.addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (file) handleFile(file);
+  });
+
+  uploadZone.addEventListener('dragover', e => {
+    e.preventDefault();
+    uploadZone.classList.add('drag-over');
+  });
+  uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag-over'));
+  uploadZone.addEventListener('drop', e => {
+    e.preventDefault();
+    uploadZone.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file && file.type === 'application/pdf') handleFile(file);
+    else showAlert('parse-alert', 'error', 'PDFファイルを選択してください');
+  });
+
+  function handleFile(file) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      pdfBase64 = reader.result.split(',')[1];
+      uploadZone.classList.add('has-file');
+      document.getElementById('upload-icon').textContent = '✅';
+      document.getElementById('upload-text').textContent = file.name;
+      document.getElementById('upload-sub').textContent = `${(file.size / 1024).toFixed(0)} KB`;
+      document.getElementById('parse-btn').disabled = false;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  // ── 正答PDF ファイル選択
+  const ansInput = document.getElementById('ans-input');
+  const uploadZoneAns = document.getElementById('upload-zone-ans');
+
+  ansInput.addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (file) handleAnswerFile(file);
+  });
+  uploadZoneAns.addEventListener('dragover', e => { e.preventDefault(); uploadZoneAns.classList.add('drag-over'); });
+  uploadZoneAns.addEventListener('dragleave', () => uploadZoneAns.classList.remove('drag-over'));
+  uploadZoneAns.addEventListener('drop', e => {
+    e.preventDefault();
+    uploadZoneAns.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file && file.type === 'application/pdf') handleAnswerFile(file);
+  });
+
+  function handleAnswerFile(file) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      answerPdfBase64 = reader.result.split(',')[1];
+      uploadZoneAns.classList.add('has-file');
+      document.getElementById('upload-icon-ans').textContent = '✅';
+      document.getElementById('upload-text-ans').textContent = file.name;
+      document.getElementById('upload-sub-ans').textContent = `${(file.size / 1024).toFixed(0)} KB`;
+      document.getElementById('ans-btn').disabled = false;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  // ── 正答PDF 解析
+  async function parseAnswerPDF() {
+    const key = document.getElementById('gemini-key').value.trim();
+    const subject = document.getElementById('subject').value;
+    const year = document.getElementById('year').value;
+
+    if (!key) { showAlert('ans-alert', 'error', 'Gemini APIキーを入力してください'); return; }
+    if (!answerPdfBase64) { showAlert('ans-alert', 'error', '正答PDFを選択してください'); return; }
+
+    const btn = document.getElementById('ans-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> 読み取り中...';
+    showProgress('ans-progress', true);
+    hideAlert('ans-alert');
+
+    const nums = parsedQuestions.map(q => q.問題番号).join('、');
+    const prompt = `このPDFは一級建築士試験（${year}）の正答一覧です。
+${subject}の問題（問題番号：${nums}）の正答のみを抽出してください。
+マークダウンのコードブロックは使わず、以下のJSON配列のみを返してください。
+
+[
+  {"問題番号": 1, "正答": "3"},
+  {"問題番号": 2, "正答": "1"}
+]
+
+注意：
+- 正答は"1"〜"4"の文字列で返してください
+- ${subject}の問題番号は${parsedQuestions[0]?.問題番号}〜${parsedQuestions[parsedQuestions.length-1]?.問題番号}です
+- 他の科目の正答は不要です`;
+
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [
+              { inline_data: { mime_type: 'application/pdf', data: answerPdfBase64 } },
+              { text: prompt }
+            ]}],
+            generationConfig: { temperature: 0.1, maxOutputTokens: 4096 }
+          })
+        }
+      );
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error?.message || `APIエラー: ${res.status}`);
+      }
+
+      const data = await res.json();
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      console.log('=== Answer Raw Response ===', text);
+
+      let jsonText = text.replace(/^\uFEFF/, '').replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+      const si = jsonText.indexOf('['), ei = jsonText.lastIndexOf(']');
+      if (si === -1 || ei === -1) throw new Error('正答JSONを抽出できませんでした');
+
+      const answers = JSON.parse(jsonText.slice(si, ei + 1));
+      // マッチング：問題番号をキーにして正答をセット
+      const ansMap = {};
+      answers.forEach(a => { ansMap[String(a.問題番号)] = String(a.正答); });
+
+      let matched = 0;
+      parsedQuestions = parsedQuestions.map(q => {
+        const ans = ansMap[String(q.問題番号)];
+        if (ans) { matched++; return { ...q, 正答: ans }; }
+        return q;
+      });
+
+      renderPreview(parsedQuestions);
+      document.getElementById('step3-num').classList.add('done');
+      showAlert('ans-alert', 'success', `✅ ${matched}問の正答をマッチングしました！内容を確認してください。`);
+
+    } catch (e) {
+      showAlert('ans-alert', 'error', `❌ エラー: ${e.message}`);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '🔑 正答を読み取る';
+      showProgress('ans-progress', false);
+    }
+  }
+
+  // ── 正答スキップ
+  function skipAnswers() {
+    renderPreview(parsedQuestions);
+    showAlert('ans-alert', 'warning', '⚠️ 正答なしでプレビューを表示します。Notion登録後に手動で正答を入力してください。');
+  }
+
+  // ── Gemini 解析
+  async function parsePDF() {
+    const key = document.getElementById('gemini-key').value.trim();
+    const subject = document.getElementById('subject').value;
+    const year = document.getElementById('year').value;
+
+    if (!key) { showAlert('parse-alert', 'error', 'Gemini APIキーを入力してください'); return; }
+    if (!pdfBase64) { showAlert('parse-alert', 'error', 'PDFを選択してください'); return; }
+
+    const btn = document.getElementById('parse-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> 解析中...';
+    showProgress('parse-progress', true);
+    hideAlert('parse-alert');
+    document.getElementById('preview-section').classList.remove('show');
+
+    const prompt = `このPDFは一級建築士試験（${year}・${subject}）の過去問題集です。
+全ての問題を抽出して、以下のJSON配列形式のみで返してください。
+マークダウンのコードブロック（\`\`\`）は絶対に使わないでください。JSONのみを返してください。
+
+[
+  {
+    "問題番号": 1,
+    "科目": "${subject}",
+    "年度": "${year}",
+    "問題文": "（問題の本文をそのまま）",
+    "選択肢1": "（選択肢1の本文）",
+    "選択肢2": "（選択肢2の本文）",
+    "選択肢3": "（選択肢3の本文）",
+    "選択肢4": "（選択肢4の本文）",
+    "正答": "1",
+    "解説": "",
+    "図表URL": ""
+  }
+]
+
+注意：
+- 正答は"1"〜"4"の文字列で返してください
+- 解説が記載されている場合はそのまま入力してください
+- 図表がある問題はわかるようであれば"図表あり"とメモしてください（後で修正します）
+- 問題番号は整数で返してください`;
+
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{
+              parts: [
+                { inline_data: { mime_type: 'application/pdf', data: pdfBase64 } },
+                { text: prompt }
+              ]
+            }],
+            generationConfig: { temperature: 0.1, maxOutputTokens: 65536 }
+          })
+        }
+      );
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error?.message || `APIエラー: ${res.status}`);
+      }
+
+      const data = await res.json();
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      console.log('=== Gemini Raw Response ===');
+      console.log(text);
+
+      if (!text) throw new Error('Geminiからの応答が空でした。PDFが読み取れない可能性があります。');
+
+      // JSON抽出（BOM・不可視文字・コードブロック・ファイルサイズ表示対応）
+      let jsonText = text
+        .replace(/^\uFEFF/, '')           // BOM除去
+        .replace(/```json\s*/g, '')       // ```json 除去
+        .replace(/```\s*/g, '')           // ``` 除去
+        .replace(/^\d+\s*KB\s*/i, '')     // "527 KB" などのファイルサイズ表示除去
+        .trim();
+
+      // まず全体をJSONとしてパースを試みる
+      let parsed = null;
+      try {
+        parsed = JSON.parse(jsonText);
+      } catch (_) {
+        // [ ... ] を探して抽出
+        const startIdx = jsonText.indexOf('[');
+        const endIdx = jsonText.lastIndexOf(']');
+        if (startIdx === -1 || endIdx === -1) {
+          const rawBox = document.getElementById('raw-response');
+          rawBox.style.display = 'block';
+          rawBox.textContent = text.slice(0, 2000);
+          throw new Error('JSON配列が見つかりませんでした。下の「Gemini生レスポンス」を確認してください。');
+        }
+        try {
+          parsed = JSON.parse(jsonText.slice(startIdx, endIdx + 1));
+        } catch (e2) {
+          const rawBox = document.getElementById('raw-response');
+          rawBox.style.display = 'block';
+          rawBox.textContent = text.slice(0, 2000);
+          // 途中で切れている可能性をチェック
+          const isTruncated = !text.trimEnd().endsWith(']');
+          if (isTruncated) {
+            throw new Error('Geminiの出力が途中で切れました。PDFのページ数が多すぎる可能性があります。PDFを前半・後半に分割してお試しください。');
+          }
+          throw new Error(`JSONの解析に失敗しました: ${e2.message}`);
+        }
+      }
+
+      parsedQuestions = Array.isArray(parsed) ? parsed : [parsed];
+      // 正答PDFセクションを表示（プレビューは正答マージ後に表示）
+      document.getElementById('answer-section').style.display = 'block';
+      document.getElementById('answer-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      showAlert('parse-alert', 'success', `✅ ${parsedQuestions.length}問を抽出しました！次に正答PDFを読み込んでください。`);
+
+    } catch (e) {
+      showAlert('parse-alert', 'error', `❌ エラー: ${e.message}`);
+      console.error(e);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '✨ Geminiで解析する';
+      showProgress('parse-progress', false);
+    }
+  }
+
+  // ── プレビュー描画
+  function renderPreview(questions) {
+    const list = document.getElementById('question-list');
+    list.innerHTML = '';
+    document.getElementById('preview-count').textContent = `${questions.length}問 抽出済み`;
+
+    questions.forEach((q, i) => {
+      const correctNum = parseInt(q.正答);
+      const choices = [q.選択肢1, q.選択肢2, q.選択肢3, q.選択肢4];
+      const choicesHTML = choices.map((c, ci) =>
+        `<div class="q-choice ${ci + 1 === correctNum ? 'correct' : ''}">${ci + 1}. ${c || '（未登録）'}</div>`
+      ).join('');
+
+      const hasFigure = q.図表URL && q.図表URL !== '';
+      list.innerHTML += `
+        <div class="q-card">
+          <div class="q-card-header">
+            <span class="q-num">No.${q.問題番号}</span>
+            <span class="q-tag">${q.科目}</span>
+            <span style="font-size:12px;color:var(--muted)">${q.年度}</span>
+            ${hasFigure ? '<span style="font-size:12px;">🖼️ 図表</span>' : ''}
+          </div>
+          <div class="q-card-body">
+            <div class="q-text">${q.問題文 || '（問題文なし）'}</div>
+            <div class="q-choices">${choicesHTML}</div>
+            <div class="q-answer">正答：<span>${q.正答}</span></div>
+            ${q.解説 ? `<div style="margin-top:8px;font-size:12px;color:var(--muted);line-height:1.6">${q.解説}</div>` : ''}
+          </div>
+        </div>`;
+    });
+
+    document.getElementById('preview-section').classList.add('show');
+  }
+
+  // ── Notion 登録
+  async function registerToNotion() {
+    if (parsedQuestions.length === 0) return;
+
+    const btn = document.getElementById('register-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> 登録中...';
+    document.getElementById('result-list').innerHTML = '';
+    hideAlert('reg-alert');
+    showProgress('reg-progress', true);
+
+    const bar = document.getElementById('reg-bar');
+    bar.style.width = '0%';
+    bar.classList.remove('animate');
+
+    let successCount = 0;
+    let failCount = 0;
+    const resultList = document.getElementById('result-list');
+
+    for (let i = 0; i < parsedQuestions.length; i++) {
+      const q = parsedQuestions[i];
+      try {
+        const res = await fetch('http://localhost:8000/api/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify([q])
+        });
+        const data = await res.json();
+        if (res.ok) {
+          const item = Array.isArray(data) ? data[0] : data;
+          if (item?.skipped) {
+            resultList.innerHTML += `<div class="result-item" style="color:var(--muted)">⏭️ No.${q.問題番号} スキップ（既存）</div>`;
+          } else {
+            successCount++;
+            resultList.innerHTML += `<div class="result-item result-ok">✅ No.${q.問題番号} 登録完了</div>`;
+          }
+        } else {
+          throw new Error(JSON.stringify(data));
+        }
+      } catch (e) {
+        failCount++;
+        resultList.innerHTML += `<div class="result-item result-ng">❌ No.${q.問題番号} 失敗: ${e.message}</div>`;
+      }
+
+      bar.style.width = `${Math.round((i + 1) / parsedQuestions.length * 100)}%`;
+      resultList.scrollTop = resultList.scrollHeight;
+      await new Promise(r => setTimeout(r, 200)); // レート制限対策
+    }
+
+    btn.disabled = false;
+    btn.innerHTML = '📥 Notionに登録する';
+    showProgress('reg-progress', false);
+
+    if (failCount === 0) {
+      showAlert('reg-alert', 'success', `🎉 全${successCount}問の登録が完了しました！`);
+    } else {
+      showAlert('reg-alert', 'warning', `⚠️ ${successCount}問成功・${failCount}問失敗。失敗分は再試行が必要です。`);
+    }
+  }
+
+  // ── ユーティリティ
+  function showAlert(id, type, msg) {
+    const el = document.getElementById(id);
+    el.className = `alert alert-${type} show`;
+    el.textContent = msg;
+  }
+  function hideAlert(id) {
+    document.getElementById(id).className = 'alert';
+  }
+  function showProgress(id, show) {
+    document.getElementById(id).classList.toggle('show', show);
+  }
+</script>
+</body>
+</html>
