@@ -76,6 +76,7 @@ def get_questions():
             "選択肢4": get_text("選択肢4"),
             "正答": get_select("正答"),
             "解説": get_text("解説"),
+            "図表URL": get_text("図表URL"),
         })
 
     return questions

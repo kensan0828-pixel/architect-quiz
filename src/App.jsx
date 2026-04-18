@@ -196,6 +196,16 @@ function handleSelect(index) {
         {q.問題文}
       </div>
 
+      {q.図表URL && (
+  <div style={{ marginBottom: 24, textAlign: "center" }}>
+    <img
+      src={q.図表URL}
+      alt="図表"
+      style={{ maxWidth: "100%", borderRadius: 8, border: "1px solid #e5e7eb" }}
+    />
+  </div>
+)}
+
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {choices.map((choice, i) => {
           const num = String(i + 1);
