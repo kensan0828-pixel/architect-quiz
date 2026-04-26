@@ -126,7 +126,16 @@ export default function App() {
 
   const displayList = shuffledOrder
     ? shuffledOrder.map(i => filtered[i])
-    : [...filtered].sort((a, b) => getQuestionNo(a) - getQuestionNo(b));
+	: [...filtered].sort((a, b) => {
+	    // 1. 年号の新しい順
+ 	   const yearDiff = yearToNumber(b.年度) - yearToNumber(a.年度);
+  	  if (yearDiff !== 0) return yearDiff;
+  	  // 2. 科目番号が小さい順
+  	  const subjectDiff = SUBJECT_ORDER.indexOf(a.科目) - SUBJECT_ORDER.indexOf(b.科目);
+  	  if (subjectDiff !== 0) return subjectDiff;
+  	  // 3. 問題番号が小さい順
+  	  return getQuestionNo(a) - getQuestionNo(b);
+ 	 });
   const q = displayList[currentIndex];
   if (!q) return <div style={{ padding: 24 }}>問題を読み込み中...</div>;
 
