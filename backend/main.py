@@ -1,8 +1,9 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Body          # ← Body をここに追加
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import os
 import httpx
+import re
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 
@@ -10,7 +11,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["http://localhost:5173", "null", "https://architect-quiz-mocha.vercel.app"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -80,3 +81,60 @@ def get_questions():
         })
 
     return questions
+
+@app.post("/api/register")
+def register_questions(questions: list = Body(...)):
+    results = []
+    for q in questions:
+        num = q.get("問題番号", "")
+        subject = q.get("科目", "")
+        year = q.get("年度", "")
+
+        # ── 重複チェック：同じ年度・科目・問題番号が既に存在するか確認
+        check = httpx.post(
+            f"{NOTION_API}/databases/{DATABASE_ID}/query",
+            headers=HEADERS,
+            json={
+                "filter": {
+                    "and": [
+                        {"property": "年度",   "select": {"equals": year}},
+                        {"property": "科目",   "select": {"equals": subject}},
+                        {"property": "問題番号", "number": {"equals": int(num) if num else 0}},
+                    ]
+                }
+            },
+            timeout=30.0,
+        )
+        existing = check.json().get("results", [])
+        if existing:
+            results.append({"番号": num, "status": 200, "ok": True, "skipped": True})
+            continue  # 重複はスキップ
+
+        # ── 新規登録
+        title = f"{year}-{subject}-No.{num}"
+        page = {
+            "parent": {"database_id": DATABASE_ID},
+            "properties": {
+                "問題タイトル": {"title": [{"text": {"content": title}}]},
+                "問題番号": {"number": int(num) if num else None},
+                "科目":    {"select": {"name": subject}},
+                "年度":    {"select": {"name": year}},
+                "問題文":  {"rich_text": [{"text": {"content": q.get("問題文", "")}}]},
+                "選択肢1": {"rich_text": [{"text": {"content": q.get("選択肢1", "")}}]},
+                "選択肢2": {"rich_text": [{"text": {"content": q.get("選択肢2", "")}}]},
+                "選択肢3": {"rich_text": [{"text": {"content": q.get("選択肢3", "")}}]},
+                "選択肢4": {"rich_text": [{"text": {"content": q.get("選択肢4", "")}}]},
+                "正答":    {"select": {"name": str(q.get("正答", ""))}},
+                "解説":    {"rich_text": [{"text": {"content": q.get("解説", "")}}]},
+                "図表URL": {"rich_text": [{"text": {"content": q.get("図表URL", "")}}]},
+            }
+        }
+        res = httpx.post(
+            f"{NOTION_API}/pages",
+            headers=HEADERS,
+            json=page,
+            timeout=30.0,
+        )
+        results.append({"番号": num, "status": res.status_code, "ok": res.status_code == 200, "skipped": False})
+
+    return results
