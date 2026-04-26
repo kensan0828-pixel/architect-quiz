@@ -210,7 +210,9 @@ function handleSelect(index) {
 
       <div style={{
         background: "#f9fafb", borderRadius: 8, padding: "16px",
-        marginBottom: 24, lineHeight: 1.7, fontSize: 15
+        marginBottom: 24, lineHeight: 1.7, fontSize: 15,
+	textAlign: "left",
+	color: "#111827",
       }}>
         {q.問題文}
       </div>
