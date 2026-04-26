@@ -27,3 +27,5 @@ __pycache__
 
 # ローカル起動用バッチ
 start_quiz.bat
+
+tools/*.pdf
