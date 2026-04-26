@@ -1,0 +1,1012 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>図表抽出ツール v5 — 一建PDF</title>
+<style>
+:root {
+  --bg:      #0d1117;
+  --sf:      #161c27;
+  --sf2:     #1e2638;
+  --bd:      #2a3347;
+  --ac:      #4e7cf6;
+  --glow:    rgba(78,124,246,0.10);
+  --tx:      #c9d3e8;
+  --dim:     #56667a;
+  --br:      #e8eef8;
+  --ok:      #4cc98a;
+  --warn:    #f5a841;
+  --skip:    #3a4a5a;
+  --mono:    'Courier New', monospace;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--tx);font-family:'Hiragino Kaku Gothic ProN','Meiryo','Yu Gothic',sans-serif;font-size:14px;min-height:100vh;padding-bottom:80px}
+
+/* Header */
+header{background:var(--sf);border-bottom:1px solid var(--bd);padding:16px 32px;display:flex;align-items:baseline;gap:16px;flex-wrap:wrap}
+header h1{font-size:17px;font-weight:700;color:var(--br);letter-spacing:.05em}
+.ver{font-size:11px;background:var(--ac);color:#fff;padding:2px 7px;border-radius:10px;font-weight:600;margin-left:4px}
+header p{font-size:12px;color:var(--dim)}
+
+/* Wrap */
+.wrap{max-width:1080px;margin:0 auto;padding:22px 32px;display:grid;gap:16px}
+
+/* Settings */
+.settings{background:var(--sf);border:1px solid var(--bd);border-radius:8px;padding:16px 20px;display:flex;gap:18px;align-items:flex-end;flex-wrap:wrap}
+.field{display:flex;flex-direction:column;gap:5px}
+.field label{font-size:10px;color:var(--dim);letter-spacing:.08em;text-transform:uppercase}
+.field input{background:var(--bg);border:1px solid var(--bd);border-radius:4px;color:var(--br);font-size:14px;padding:6px 10px;outline:none;width:100px;transition:border-color .15s}
+.field input[type=number]{width:72px}
+.field input:focus{border-color:var(--ac);box-shadow:0 0 0 2px var(--glow)}
+
+/* Drop */
+#drop{background:var(--sf);border:2px dashed var(--bd);border-radius:10px;padding:36px 24px;text-align:center;cursor:pointer;position:relative;transition:border-color .2s,background .2s}
+#drop:hover,#drop.over{border-color:var(--ac);background:rgba(78,124,246,.04)}
+#drop .ico{font-size:36px}
+#drop p{color:var(--dim);margin-top:8px}
+#drop .fn{margin-top:8px;color:var(--ac);font-family:var(--mono);font-size:12px}
+#drop input{position:absolute;inset:0;opacity:0;cursor:pointer}
+
+/* Buttons */
+.btns{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+button{padding:9px 20px;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;border:none;transition:all .15s}
+#runBtn{background:var(--ac);color:#fff}
+#runBtn:hover:not(:disabled){background:#3a6af0}
+#runBtn:disabled{background:var(--sf2);color:var(--dim);cursor:not-allowed}
+#zipBtn{background:var(--sf2);color:var(--tx);border:1px solid var(--bd)}
+#zipBtn:hover:not(:disabled){border-color:var(--ac);color:var(--ac)}
+#zipBtn:disabled{opacity:.35;cursor:not-allowed}
+#status{font-family:var(--mono);font-size:12px;color:var(--dim);margin-left:4px}
+
+/* Progress */
+.bar-wrap{background:var(--sf2);border-radius:4px;height:3px;overflow:hidden}
+#bar{height:100%;background:var(--ac);width:0;transition:width .25s}
+
+/* Log */
+#log{background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:12px 14px;font-family:var(--mono);font-size:11.5px;line-height:1.8;max-height:300px;overflow-y:auto;display:none}
+.L-ok{color:var(--ok)}.L-warn{color:var(--warn)}.L-skip{color:var(--skip)}.L-info{color:var(--dim)}.L-sep{color:#1e2638}.L-dbg{color:#3a5080}
+
+/* Preview */
+#prevSec{display:none}
+#prevSec h2{font-size:12px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.1em;margin-bottom:14px}
+#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:14px}
+.card{background:var(--sf);border:1px solid var(--bd);border-radius:8px;overflow:hidden;transition:border-color .15s}
+.card:hover{border-color:var(--ac)}
+.card img{width:100%;display:block;background:#fff;cursor:zoom-in}
+.card-body{padding:9px 11px;border-top:1px solid var(--bd)}
+.card-name{font-family:var(--mono);font-size:11px;color:var(--tx);margin-bottom:6px;word-break:break-all}
+.rn{display:flex;gap:5px}
+.rn input{flex:1;background:var(--bg);border:1px solid var(--bd);border-radius:3px;color:var(--tx);font-family:var(--mono);font-size:11px;padding:4px 6px;outline:none}
+.rn input:focus{border-color:var(--ac)}
+.rn button{padding:4px 8px;font-size:11px;background:var(--sf2);color:var(--dim);border:1px solid var(--bd);border-radius:3px}
+.rn button:hover{color:var(--ac);border-color:var(--ac)}
+.del-btn{display:block;width:100%;margin-top:6px;padding:4px 0;font-size:11px;background:transparent;color:var(--dim);border:1px solid var(--bd);border-radius:3px;cursor:pointer;transition:all .15s}
+.del-btn:hover{background:rgba(220,60,60,0.12);color:#e05555;border-color:#e05555}
+
+/* Lightbox */
+#lb{display:none;position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:999;align-items:center;justify-content:center;cursor:zoom-out}
+#lb.open{display:flex}
+#lb img{max-width:90vw;max-height:90vh;border-radius:4px;box-shadow:0 24px 80px #000}
+
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
+
+/* Manual Crop */
+#cropSec{background:var(--sf);border:1px solid var(--bd);border-radius:8px;padding:16px 20px;display:none}
+#cropSec h2{font-size:12px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px}
+.crop-controls{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px}
+#cropPageNum{width:72px}
+#cropCanvasWrap{position:relative;display:none;cursor:crosshair;border:1px solid var(--bd);border-radius:4px;overflow:hidden;width:100%}
+#cropCanvas{display:block;width:100%;height:auto}
+/* 左右マージンシェード */
+#cropShadeL,#cropShadeR{position:absolute;top:0;bottom:0;background:rgba(0,0,0,0.35);pointer-events:none;display:none}
+/* 選択領域 */
+#cropSel{position:absolute;border:2px solid var(--ac);background:rgba(78,124,246,0.13);display:none;left:0;right:0}
+/* ハンドルバー */
+.crop-hbar{position:absolute;left:0;right:0;height:12px;background:var(--ac);opacity:0.85;cursor:ns-resize;display:flex;align-items:center;justify-content:center}
+.crop-hbar::after{content:'';display:block;width:32px;height:2px;background:rgba(255,255,255,0.7);border-radius:1px}
+#cropHTop{top:-6px}
+#cropHBot{bottom:-6px}
+/* 保存行 */
+.crop-save{display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap}
+#cropFilename{background:var(--bg);border:1px solid var(--bd);border-radius:4px;color:var(--br);font-family:var(--mono);font-size:12px;padding:6px 10px;outline:none;width:260px}
+#cropFilename:focus{border-color:var(--ac)}
+#cropAddBtn{background:var(--ok);color:#fff;padding:7px 16px;border-radius:6px;font-size:13px;font-weight:600}
+#cropAddBtn:disabled{opacity:.35;cursor:not-allowed}
+#cropHint{font-size:11px;color:var(--dim);margin-top:8px;min-height:18px}
+</style>
+</head>
+<body>
+
+<header>
+  <div><h1>図表抽出ツール <span class="ver">v5</span></h1></div>
+  <p>一級建築士試験PDF → 図・表・グラフを自動切り出し</p>
+</header>
+
+<div class="wrap">
+
+  <div class="settings">
+    <div class="field"><label>年度コード</label><input id="year" value="r7" maxlength="8"></div>
+    <div class="field"><label>科目コード</label><input id="subject" value="4" maxlength="20"></div>
+    <div class="field"><label>水平マージン px</label><input id="hmargin" type="number" value="40" min="0" max="200" step="5"></div>
+    <div class="field"><label>出力倍率</label><input id="outscale" type="number" value="2" min="1" max="4" step="0.5"></div>
+    <div class="field"><label>最小図高さ px</label><input id="mingap" type="number" value="150" min="20" max="300" step="10"></div>
+    <div class="field"><label>密度閾値 %</label><input id="pxthr" type="number" value="0.8" min="0.5" max="10" step="0.5"></div>
+    <div class="field"><label>開始ページ</label><input id="startpage" type="number" value="1" min="1" step="1"></div>
+    <div class="field"><label>終了ページ</label><input id="endpage" type="number" value="" min="1" step="1" placeholder="末尾"></div>
+  </div>
+
+  <div id="drop">
+    <div class="ico">📄</div>
+    <p>PDFをドロップ、またはクリックして選択</p>
+    <div class="fn" id="fn"></div>
+    <input type="file" id="fi" accept=".pdf">
+  </div>
+
+  <div class="btns">
+    <button id="runBtn" disabled>▶ 抽出開始</button>
+    <button id="zipBtn" disabled>📁 フォルダに保存</button>
+    <button id="folderBtn">🗂 保存先を変更</button>
+    <span id="folderName" style="font-size:11px;color:var(--dim);font-family:var(--mono)"></span>
+    <span id="status"></span>
+  </div>
+
+  <div class="bar-wrap" id="barWrap" style="display:none"><div id="bar"></div></div>
+  <div id="log"></div>
+
+  <!-- 手動クロップ -->
+  <div id="cropSec">
+    <h2>手動クロップ</h2>
+    <div class="crop-controls">
+      <div class="field"><label>ページ番号</label><input id="cropPageNum" type="number" value="1" min="1" step="1"></div>
+      <button id="cropOpenBtn">📄 ページを開く</button>
+    </div>
+    <div id="cropCanvasWrap">
+      <canvas id="cropCanvas"></canvas>
+      <div id="cropShadeL"></div>
+      <div id="cropShadeR"></div>
+      <div id="cropSel">
+        <div class="crop-hbar" id="cropHTop"></div>
+        <div class="crop-hbar" id="cropHBot"></div>
+      </div>
+    </div>
+    <div id="cropHint">ページを開いたあと、縦方向にドラッグして切り出し範囲を指定してください。</div>
+    <div class="crop-save">
+      <input type="text" id="cropFilename" placeholder="ファイル名（例: r7_5_no10.png）">
+      <button id="cropAddBtn" disabled>＋ 結果に追加</button>
+    </div>
+  </div>
+
+  <div id="prevSec">
+    <h2>抽出結果</h2>
+    <div id="grid"></div>
+  </div>
+</div>
+
+<div id="lb"><img id="lbImg" src="" alt=""></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+'use strict';
+
+// ═══════════════════════════════════
+//  定数
+// ═══════════════════════════════════
+const ANALYSIS_SCALE  = 1.0;
+const PIXEL_SCALE     = 0.5;
+const CHOICE_X_TOL    = 80;   // 選択肢番号のX許容ズレ(px)
+const BOUNDARY_MARGIN = 8;    // 選択肢上端から図の下端までの余白(px)
+const COVER_KEYWORDS  = ['問　題　集','問題集','注意事項','答案用紙'];
+
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+
+// ═══════════════════════════════════
+//  状態
+// ═══════════════════════════════════
+let pdfFile = null;
+let results = [];   // { uid, filename, dataUrl }
+let nextUid = 0;
+let savedDirHandle = null;
+
+// ═══════════════════════════════════
+//  UI
+// ═══════════════════════════════════
+const drop   = document.getElementById('drop');
+const fi     = document.getElementById('fi');
+const fnEl   = document.getElementById('fn');
+const runBtn = document.getElementById('runBtn');
+const zipBtn = document.getElementById('zipBtn');
+const folderBtn  = document.getElementById('folderBtn');
+const folderName = document.getElementById('folderName');
+const stEl   = document.getElementById('status');
+const barWrp = document.getElementById('barWrap');
+const bar    = document.getElementById('bar');
+const logEl  = document.getElementById('log');
+const prevSec= document.getElementById('prevSec');
+const grid   = document.getElementById('grid');
+const lb     = document.getElementById('lb');
+const lbImg  = document.getElementById('lbImg');
+
+drop.addEventListener('dragover', e=>{ e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave',()=> drop.classList.remove('over'));
+drop.addEventListener('drop', e=>{
+  e.preventDefault(); drop.classList.remove('over');
+  const f = e.dataTransfer.files[0];
+  if (f && f.name.toLowerCase().endsWith('.pdf')) setFile(f);
+});
+fi.addEventListener('change', ()=>{ if (fi.files[0]) setFile(fi.files[0]); });
+
+function setFile(f) {
+  pdfFile = f;
+  fnEl.textContent = `📎 ${f.name}  (${(f.size/1024/1024).toFixed(2)} MB)`;
+  runBtn.disabled = false;
+}
+
+// ═══════════════════════════════════
+//  ログ
+// ═══════════════════════════════════
+function log(msg, cls='info') {
+  logEl.style.display = 'block';
+  const d = document.createElement('div');
+  d.className = 'L-' + cls;
+  d.textContent = msg || '─'.repeat(54);
+  logEl.appendChild(d);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+// ═══════════════════════════════════
+//  テキストアイテム → VP座標
+// ═══════════════════════════════════
+function itemToVP(item, viewport) {
+  const [a, , , d, x, y] = item.transform;
+  const [vx, vy] = viewport.convertToViewportPoint(x, y);
+  const fontSize = Math.abs(d) || Math.abs(a) || 12;
+  return { x: vx, y: vy, fontSize, str: item.str };
+}
+
+// ═══════════════════════════════════
+//  選択肢番号判定  ★v3修正: スペース除去★
+//  "1 ．" "１ ．" "1. " "１．text" 等を全て検出
+// ═══════════════════════════════════
+function isChoiceNum(rawStr, n) {
+  // スペースを除去してから比較
+  const s = rawStr.replace(/\s/g, '');
+  const h = String(n);                        // "1"
+  const f = String.fromCharCode(0xFF10 + n);  // "１"
+
+  return (
+    s === h || s === f ||
+    s === h + '.'  || s === h + '．' ||
+    s === f + '.'  || s === f + '．' ||
+    s.startsWith(h + '.') || s.startsWith(h + '．') ||
+    s.startsWith(f + '.') || s.startsWith(f + '．')
+  );
+}
+
+// ═══════════════════════════════════
+//  選択肢「1.」の先頭Y座標を検出
+// ═══════════════════════════════════
+function findChoiceY(items) {
+  const bins = { 1:[], 2:[], 3:[], 4:[] };
+
+  for (const t of items) {
+    const s = t.str.trim();
+    if (!s) continue;
+    for (let n = 1; n <= 4; n++) {
+      if (isChoiceNum(s, n)) {
+        bins[n].push({ x: t.x, y: t.y });
+      }
+    }
+  }
+
+  for (let n = 1; n <= 4; n++) bins[n].sort((a,b)=>a.y-b.y);
+
+  // ★v4修正: 全有効配列を収集し「最も下（最大Y）」を返す
+  // 図の中や問題番号の数字が先に誤検出されるケースへの対処
+  const validYs = [];
+  for (const w1 of bins[1]) {
+    const xBase = w1.x;
+    const w2 = bins[2].find(w => w.y > w1.y + 3 && Math.abs(w.x - xBase) < CHOICE_X_TOL);
+    if (!w2) continue;
+    const w3 = bins[3].find(w => w.y > w2.y + 3 && Math.abs(w.x - xBase) < CHOICE_X_TOL);
+    if (!w3) continue;
+    const w4 = bins[4].find(w => w.y > w3.y + 3 && Math.abs(w.x - xBase) < CHOICE_X_TOL);
+    if (!w4) continue;
+    validYs.push(w1.y);
+  }
+  if (validYs.length === 0) return null;
+  return Math.max(...validYs); // 最も下の配列が本物の選択肢
+}
+
+// ═══════════════════════════════════
+//  問題文末尾Y座標を検出
+//  ★v3修正: questionEndY=nullのとき抽出しない (false positive 防止)★
+// ═══════════════════════════════════
+function findQuestionTextEnd(items, choiceY, pageW) {
+  // choiceY より上のテキストアイテム
+  const above = items.filter(t => t.y < choiceY && t.str.trim().length > 0);
+  // ページ左側50%以内から始まるテキストを対象
+  const threshold = pageW * 0.50;
+
+  let endY = null;
+
+  // 1) 「。」を含む、左寄りのテキスト
+  for (const t of above) {
+    if (t.str.includes('。') && t.str.trim().length > 2 && t.x <= threshold) {
+      if (endY === null || t.y > endY) endY = t.y;
+    }
+  }
+
+  // 2) Fallback: 「どれか」「なものは」「正しいものは」で終わる行
+  if (endY === null) {
+    const ENDINGS = ['どれか', 'どれか。', 'なものは', 'いくらか', 'いくつか', 'するか'];
+    for (const t of above) {
+      if (ENDINGS.some(e => t.str.includes(e)) && t.x <= threshold) {
+        if (endY === null || t.y > endY) endY = t.y;
+      }
+    }
+  }
+
+  // 3) 最終 Fallback: 左寄りで、ある程度長い文字列の最下端
+  if (endY === null) {
+    for (const t of [...above].sort((a,b)=>b.y-a.y)) {
+      if (t.str.trim().length >= 8 && t.x <= threshold) {
+        endY = t.y;
+        break;
+      }
+    }
+  }
+
+  return endY; // null の場合は呼び出し側でスキップ
+}
+
+// ═══════════════════════════════════
+//  問題番号を検出
+// ═══════════════════════════════════
+function findQuestionNumber(items, choiceY) {
+  const above = items.filter(t => t.y < choiceY);
+  const allText = above.map(t => t.str).join('');
+
+  let m;
+
+  // ★v4修正: [.．]? で全角ピリオドにも対応
+  // 旧: \.? (半角のみ) → 〔Ｎｏ．３〕の「．」にマッチしなかった
+  const matches = [...allText.matchAll(/[〔\[]\s*[NnＮｎ][oOｏＯ]?[.．]?\s*([\d０-９]+)\s*[〕\]]/g)];
+  if (matches.length > 0) return toHalf(matches[matches.length - 1][1]);
+
+  // No.XX / Ｎｏ．XX 形式 (ASCII混在)
+  m = allText.match(/[NnＮｎ][oOｏＯ][.．\s](\d+)/);
+  if (m) return m[1];
+
+  // ★v4: 寸法ラベル「4 m」誤検出を防ぐため先頭番号フォールバックは削除
+  return null;
+}
+
+function toHalf(s) {
+  return s.replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
+}
+
+// ═══════════════════════════════════
+//  ピクセル密度チェック（図の有無確認）
+// ═══════════════════════════════════
+async function checkPixelContent(page, topY, bottomY, threshold) {
+  const vp = page.getViewport({ scale: PIXEL_SCALE });
+  const canvas = document.createElement('canvas');
+  canvas.width  = vp.width;
+  canvas.height = vp.height;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  await page.render({ canvasContext: ctx, viewport: vp }).promise;
+
+  const y0 = Math.max(0, Math.floor(topY  * PIXEL_SCALE));
+  const y1 = Math.min(canvas.height, Math.ceil(bottomY * PIXEL_SCALE));
+  const h  = y1 - y0;
+  if (h <= 0) return { ok: false, density: 0 };
+
+  const data = ctx.getImageData(0, y0, canvas.width, h).data;
+  let dark = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i] < 180 && data[i+1] < 180 && data[i+2] < 180) dark++;
+  }
+  const density = dark / (canvas.width * h);
+  return { ok: density >= threshold, density };
+}
+
+// ═══════════════════════════════════
+//  トリミング・PNG生成
+// ═══════════════════════════════════
+async function cropPage(page, vpW, topY, bottomY, hmargin, outScale) {
+  const vp = page.getViewport({ scale: outScale });
+  const ratio = outScale / ANALYSIS_SCALE;
+
+  const x0 = Math.round(hmargin * ratio);
+  const x1 = Math.round((vpW - hmargin) * ratio);
+  const y0 = Math.max(0,         Math.round(topY    * ratio));
+  const y1 = Math.min(vp.height, Math.round(bottomY * ratio));
+  const W = x1 - x0, H = y1 - y0;
+
+  if (W <= 0 || H <= 0) return null;
+
+  const off = document.createElement('canvas');
+  off.width  = vp.width;
+  off.height = vp.height;
+  const offCtx = off.getContext('2d');
+  offCtx.fillStyle = '#fff';
+  offCtx.fillRect(0, 0, off.width, off.height);
+  await page.render({ canvasContext: offCtx, viewport: vp }).promise;
+
+  const out = document.createElement('canvas');
+  out.width = W; out.height = H;
+  const outCtx = out.getContext('2d');
+  outCtx.fillStyle = '#fff';
+  outCtx.fillRect(0, 0, W, H);
+  outCtx.drawImage(off, x0, y0, W, H, 0, 0, W, H);
+  return out.toDataURL('image/png');
+}
+
+// ═══════════════════════════════════
+//  メイン処理
+// ═══════════════════════════════════
+runBtn.addEventListener('click', async () => {
+  if (!pdfFile) return;
+  runBtn.disabled = true;
+  zipBtn.disabled = true;
+  results = [];
+  grid.innerHTML = '';
+  prevSec.style.display = 'none';
+  barWrp.style.display = 'block';
+  bar.style.width = '0%';
+  logEl.innerHTML = '';
+
+  const year     = document.getElementById('year').value.trim()     || 'r7';
+  const subject  = document.getElementById('subject').value.trim()  || 'X';
+  const hmargin  = parseInt(document.getElementById('hmargin').value)   || 40;
+  const outScale = parseFloat(document.getElementById('outscale').value) || 2;
+  const minGap   = parseInt(document.getElementById('mingap').value)    || 60;
+  const pxThr    = parseFloat(document.getElementById('pxthr').value) / 100 || 0.015;
+  const startPageVal = parseInt(document.getElementById('startpage').value) || 1;
+  const endPageVal   = parseInt(document.getElementById('endpage').value)   || 0;
+
+  log('', 'sep');
+  log(`開始  年度:${year}  科目:${subject}  HM:${hmargin}  倍率:${outScale}  最小高さ:${minGap}px  密度閾値:${(pxThr*100).toFixed(1)}%`);
+
+  try {
+    const buf = await pdfFile.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({
+      data: buf,
+      cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.4.120/cmaps/',
+      cMapPacked: true,
+      useWorkerFetch: true
+    }).promise;
+    const total = pdf.numPages;
+    const startPage = Math.max(1, startPageVal);
+    const endPage   = (endPageVal > 0) ? Math.min(endPageVal, total) : total;
+    log(`総ページ数: ${total}  処理範囲: p${startPage}〜p${endPage}`);
+    log('', 'sep');
+
+    let saved = 0, unknown = 0;
+
+    for (let pn = startPage; pn <= endPage; pn++) {
+      bar.style.width = `${((pn - startPage + 1) / (endPage - startPage + 1) * 100).toFixed(0)}%`;
+      stEl.textContent = `p${pn} / ${endPage}`;
+
+      const page = await pdf.getPage(pn);
+      const vp   = page.getViewport({ scale: ANALYSIS_SCALE });
+      const vpW  = vp.width, vpH = vp.height;
+
+      const tc    = await page.getTextContent();
+      const items = tc.items.map(i => itemToVP(i, vp));
+      const allText = items.map(i => i.str).join('');
+
+      // ── 表紙スキップ ──
+      if (COVER_KEYWORDS.some(k => allText.includes(k))) {
+        log(`p${pad(pn)} : [スキップ] 表紙/注意事項`, 'skip'); continue;
+      }
+      // ── 空白ページスキップ ──
+      if (items.filter(i => i.str.trim()).length < 5) {
+        log(`p${pad(pn)} : [スキップ] 空白ページ`, 'skip'); continue;
+      }
+
+      // ── 選択肢 1-4 の Y 座標を検出 ──
+      const choiceY = findChoiceY(items);
+      if (choiceY === null) {
+        log(`p${pad(pn)} : [スキップ] 選択肢1-4未検出`, 'skip'); continue;
+      }
+
+      // ── 問題文末尾の Y 座標を検出 ──
+      //   ★ null の場合は抽出しない (false positive 防止) ★
+      const questionEndY = findQuestionTextEnd(items, choiceY, vpW);
+      if (questionEndY === null) {
+        log(`p${pad(pn)} : [スキップ] 問題文末尾未検出 (choiceY=${f1(choiceY)})`, 'skip'); continue;
+      }
+
+      const topY    = questionEndY + 5;
+      const bottomY = choiceY - BOUNDARY_MARGIN;
+      const gapH    = bottomY - topY;
+
+      // デバッグ出力
+      log(`p${pad(pn)} : 問題文末Y=${f1(questionEndY)}  選択肢Y=${f1(choiceY)}  ギャップ=${f1(gapH)}px`, 'dbg');
+
+      // ── 最小ギャップ確認 ──
+      if (gapH < minGap) {
+        log(`  → [スキップ] ギャップ ${f1(gapH)}px < ${minGap}px`, 'skip'); continue;
+      }
+
+      // ── ピクセル密度確認 ──
+      const px = await checkPixelContent(page, topY, bottomY, pxThr);
+      log(`  → ピクセル密度 ${(px.density*100).toFixed(2)}%  → ${px.ok ? '✓ 図あり' : '✗ 図なし'}`, px.ok ? 'ok' : 'skip');
+      if (!px.ok) continue;
+
+      // ── 問題番号 ──
+      const qNum = findQuestionNumber(items, choiceY);
+      let filename;
+      if (qNum) {
+        filename = `${year}_${subject}_no${qNum}.png`;
+      } else {
+        unknown++;
+        filename = `${year}_${subject}_p${pad(pn)}_要リネーム.png`;
+      }
+
+      // ── 切り出し・保存 ──
+      const dataUrl = await cropPage(page, vpW, topY, bottomY, hmargin, outScale);
+      if (!dataUrl) { log(`  → 画像生成失敗`, 'warn'); continue; }
+
+      results.push({ uid: nextUid, filename, dataUrl });
+      addCard(filename, dataUrl, nextUid++);
+      log(`  → 保存: ${filename}`, 'ok');
+      saved++;
+    }
+
+    log('', 'sep');
+    log(`完了  ${saved} 件保存  番号未検出: ${unknown} 件`, saved > 0 ? 'ok' : 'warn');
+    bar.style.width = '100%';
+    stEl.textContent = `${saved} 件完了`;
+
+    if (results.length > 0) {
+      prevSec.style.display = 'block';
+      zipBtn.disabled = false;
+    }
+
+  } catch (e) {
+    log('エラー: ' + e.message, 'warn');
+    console.error(e);
+  } finally {
+    runBtn.disabled = false;
+  }
+});
+
+// ═══════════════════════════════════
+//  プレビューカード
+// ═══════════════════════════════════
+function addCard(filename, dataUrl, uid) {
+  prevSec.style.display = 'block';
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.id = `card-${uid}`;
+  card.innerHTML = `
+    <img src="${dataUrl}" alt="${filename}" title="クリックで拡大">
+    <div class="card-body">
+      <div class="card-name" id="nm-${uid}">${filename}</div>
+      <div class="rn">
+        <input type="text" id="rn-${uid}" value="${filename}">
+        <button onclick="doRename(${uid})">変更</button>
+      </div>
+      <button class="del-btn" onclick="doDelete(${uid})">🗑 削除</button>
+    </div>
+  `;
+  card.querySelector('img').addEventListener('click', ()=>{ lbImg.src=dataUrl; lb.classList.add('open'); });
+  grid.appendChild(card);
+}
+function doRename(uid) {
+  let v = document.getElementById(`rn-${uid}`).value.trim();
+  if (!v) return;
+  if (!v.endsWith('.png')) v += '.png';
+  const r = results.find(r => r.uid === uid);
+  if (r) r.filename = v;
+  document.getElementById(`nm-${uid}`).textContent = v;
+  document.getElementById(`rn-${uid}`).value = v;
+}
+function doDelete(uid) {
+  const idx = results.findIndex(r => r.uid === uid);
+  if (idx !== -1) results.splice(idx, 1);
+  const card = document.getElementById(`card-${uid}`);
+  if (card) card.remove();
+  if (results.length === 0) {
+    prevSec.style.display = 'none';
+    zipBtn.disabled = true;
+  }
+}
+lb.addEventListener('click', ()=> lb.classList.remove('open'));
+
+// ═══════════════════════════════════
+//  IndexedDB：フォルダハンドルの永続化
+// ═══════════════════════════════════
+function openIDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('figureExtractor', 1);
+    req.onupgradeneeded = e => e.target.result.createObjectStore('handles');
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+async function saveHandleIDB(handle) {
+  const db = await openIDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('handles', 'readwrite');
+    tx.objectStore('handles').put(handle, 'saveDir');
+    tx.oncomplete = resolve;
+    tx.onerror = e => reject(e.target.error);
+  });
+}
+async function loadHandleIDB() {
+  const db = await openIDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('handles', 'readonly');
+    const req = tx.objectStore('handles').get('saveDir');
+    req.onsuccess = e => resolve(e.target.result || null);
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+function showFolderName(handle) {
+  folderName.textContent = handle ? `📂 ${handle.name}` : '';
+}
+
+// 起動時にフォルダハンドルを復元
+window.addEventListener('load', async () => {
+  try {
+    const h = await loadHandleIDB();
+    if (h) {
+      savedDirHandle = h;
+      showFolderName(h);
+    }
+  } catch(e) { /* 初回起動時はIDB未作成のため無視 */ }
+});
+
+// ═══════════════════════════════════
+//  保存先フォルダ選択
+// ═══════════════════════════════════
+folderBtn.addEventListener('click', async () => {
+  try {
+    const h = await window.showDirectoryPicker({ mode: 'readwrite' });
+    savedDirHandle = h;
+    await saveHandleIDB(h);
+    showFolderName(h);
+  } catch(e) {
+    if (e.name !== 'AbortError') stEl.textContent = 'フォルダ選択エラー: ' + e.message;
+  }
+});
+
+// ═══════════════════════════════════
+//  フォルダに保存
+// ═══════════════════════════════════
+zipBtn.addEventListener('click', async () => {
+  if (!results.length) return;
+
+  // フォルダ未指定なら選択ダイアログを出す
+  if (!savedDirHandle) {
+    try {
+      const h = await window.showDirectoryPicker({ mode: 'readwrite' });
+      savedDirHandle = h;
+      await saveHandleIDB(h);
+      showFolderName(h);
+    } catch(e) {
+      if (e.name !== 'AbortError') stEl.textContent = 'フォルダ選択エラー: ' + e.message;
+      return;
+    }
+  }
+
+  // 書き込み権限を確認（ページリロード後は再許可が必要な場合あり）
+  let perm = await savedDirHandle.queryPermission({ mode: 'readwrite' });
+  if (perm !== 'granted') {
+    perm = await savedDirHandle.requestPermission({ mode: 'readwrite' });
+  }
+  if (perm !== 'granted') {
+    stEl.textContent = 'フォルダへのアクセスが許可されていません';
+    return;
+  }
+
+  zipBtn.disabled = true;
+  stEl.textContent = '保存中…';
+  let saved = 0;
+  try {
+    for (const r of results) {
+      // 入力欄の現在値を優先（「変更」ボタン未押しでも反映）
+      const inputEl = document.getElementById(`rn-${r.uid}`);
+      let filename = (inputEl && inputEl.value.trim()) ? inputEl.value.trim() : r.filename;
+      if (!filename.endsWith('.png')) filename += '.png';
+      const { dataUrl } = r;
+      const base64 = dataUrl.split(',')[1];
+      const binary = atob(base64);
+      const bytes  = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const fh = await savedDirHandle.getFileHandle(filename, { create: true });
+      const ws = await fh.createWritable();
+      await ws.write(bytes);
+      await ws.close();
+      saved++;
+    }
+    stEl.textContent = `${saved} 件を「${savedDirHandle.name}」に保存しました`;
+  } catch(e) {
+    stEl.textContent = '保存エラー: ' + e.message;
+    console.error(e);
+  } finally {
+    zipBtn.disabled = false;
+  }
+});
+
+// ═══════════════════════════════════
+//  ユーティリティ
+// ═══════════════════════════════════
+function pad(n) { return String(n).padStart(2,'0'); }
+function f1(n)  { return n != null ? Number(n).toFixed(1) : 'null'; }
+
+// ═══════════════════════════════════
+//  手動クロップ
+// ═══════════════════════════════════
+// ═══════════════════════════════════
+//  手動クロップ
+// ═══════════════════════════════════
+const cropSec        = document.getElementById('cropSec');
+const cropOpenBtn    = document.getElementById('cropOpenBtn');
+const cropCanvasWrap = document.getElementById('cropCanvasWrap');
+const cropCanvas     = document.getElementById('cropCanvas');
+const cropShadeL     = document.getElementById('cropShadeL');
+const cropShadeR     = document.getElementById('cropShadeR');
+const cropSel        = document.getElementById('cropSel');
+const cropHTop       = document.getElementById('cropHTop');
+const cropHBot       = document.getElementById('cropHBot');
+const cropFilename   = document.getElementById('cropFilename');
+const cropAddBtn     = document.getElementById('cropAddBtn');
+const cropHint       = document.getElementById('cropHint');
+
+// 状態
+let cropPdf     = null;  // PDFドキュメント
+let cropPageObj = null;  // 現在ページ
+let cropScale   = 1;     // 表示スケール（PDF→canvaspx）
+let cropBaseW   = 0;     // PDF元の幅（px, scale=1）
+
+// 固定横幅（CSSピクセル）
+let fixCssX0 = 0, fixCssX1 = 0;
+
+// 選択範囲（CSSピクセル、ラッパー内座標）
+let selY0 = 0, selY1 = 0;
+let hasSelection = false;
+
+// ドラッグ状態
+let dragMode  = null;  // 'new' | 'top' | 'bot'
+let dragAnchorY = 0;   // ドラッグ開始時のマウスY（ページ座標）
+let dragAnchorSel = null; // ドラッグ開始時のselY0/selY1
+
+// PDFが読み込まれたらセクション表示
+fi.addEventListener('change',  () => setTimeout(() => { if (pdfFile) { cropSec.style.display='block'; cropPdf=null; } }, 100));
+drop.addEventListener('drop',  () => setTimeout(() => { if (pdfFile) { cropSec.style.display='block'; cropPdf=null; } }, 100));
+
+// ─── ページを開く ───
+cropOpenBtn.addEventListener('click', async () => {
+  if (!pdfFile) return;
+  const pn = parseInt(document.getElementById('cropPageNum').value) || 1;
+  cropOpenBtn.disabled = true;
+  cropOpenBtn.textContent = '読み込み中…';
+  try {
+    if (!cropPdf) {
+      const buf = await pdfFile.arrayBuffer();
+      cropPdf = await pdfjsLib.getDocument({
+        data: buf,
+        cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.4.120/cmaps/',
+        cMapPacked: true,
+        useWorkerFetch: true
+      }).promise;
+    }
+    const page = await cropPdf.getPage(pn);
+    const baseVP = page.getViewport({ scale: 1 });
+    cropBaseW = baseVP.width;
+
+    // 表示スケール：ラッパー幅に合わせる
+    const dispW = cropSec.clientWidth - 42;
+    cropScale = dispW / cropBaseW;
+    const vp = page.getViewport({ scale: cropScale });
+    cropPageObj = page;
+
+    cropCanvas.width  = vp.width;
+    cropCanvas.height = vp.height;
+    const ctx = cropCanvas.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, vp.width, vp.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+
+    cropCanvasWrap.style.display = 'block';
+
+    // 固定横幅のシェードを更新（hmarginはPDF座標px、cropScaleでCSS座標へ）
+    updateShades();
+
+    // 選択リセット
+    hasSelection = false;
+    cropSel.style.display = 'none';
+    cropAddBtn.disabled = true;
+    cropHint.textContent = '縦方向にドラッグして切り出し範囲を指定してください。';
+
+  } catch(e) {
+    cropHint.textContent = 'エラー: ' + e.message;
+  } finally {
+    cropOpenBtn.disabled = false;
+    cropOpenBtn.textContent = '📄 ページを開く';
+  }
+});
+
+function updateShades() {
+  const hm = parseInt(document.getElementById('hmargin').value) || 40;
+  // CSS幅（canvasはwidth:100%なのでラッパー幅＝canvas表示幅）
+  const wrapW = cropCanvasWrap.clientWidth;
+  const canvasNatW = cropCanvas.width;  // canvas自然幅（px）
+  const cssPerCanvasPx = wrapW / canvasNatW;
+
+  fixCssX0 = hm * cropScale * cssPerCanvasPx;
+  fixCssX1 = (cropBaseW - hm) * cropScale * cssPerCanvasPx;
+
+  cropShadeL.style.display = 'block';
+  cropShadeR.style.display = 'block';
+  cropShadeL.style.left  = '0';
+  cropShadeL.style.width = fixCssX0 + 'px';
+  cropShadeR.style.left  = fixCssX1 + 'px';
+  cropShadeR.style.right = '0';
+}
+
+function updateSelOverlay() {
+  if (!hasSelection) return;
+  const top = Math.min(selY0, selY1);
+  const bot = Math.max(selY0, selY1);
+  cropSel.style.display  = 'block';
+  cropSel.style.top      = top + 'px';
+  cropSel.style.height   = (bot - top) + 'px';
+  cropSel.style.left     = fixCssX0 + 'px';
+  cropSel.style.right    = (cropCanvasWrap.clientWidth - fixCssX1) + 'px';
+  cropHint.textContent   = `選択範囲: 上端 ${Math.round(top)}px / 下端 ${Math.round(bot)}px  →  ハンドルで微調整できます`;
+}
+
+// ─── ハンドルのカーソル設定 ───
+cropHTop.style.cursor = 'ns-resize';
+cropHBot.style.cursor = 'ns-resize';
+
+// ─── マウスイベント ───
+function wrapY(e) {
+  return e.clientY - cropCanvasWrap.getBoundingClientRect().top;
+}
+
+// ハンドルのドラッグ開始
+cropHTop.addEventListener('mousedown', e => {
+  e.stopPropagation();
+  dragMode = 'top';
+  dragAnchorY = e.clientY;
+  dragAnchorSel = { y0: Math.min(selY0,selY1), y1: Math.max(selY0,selY1) };
+  document.body.style.userSelect = 'none';
+});
+cropHBot.addEventListener('mousedown', e => {
+  e.stopPropagation();
+  dragMode = 'bot';
+  dragAnchorY = e.clientY;
+  dragAnchorSel = { y0: Math.min(selY0,selY1), y1: Math.max(selY0,selY1) };
+  document.body.style.userSelect = 'none';
+});
+
+// キャンバスでの新規選択開始
+cropCanvasWrap.addEventListener('mousedown', e => {
+  if (dragMode) return;
+  dragMode = 'new';
+  const y = wrapY(e);
+  selY0 = y; selY1 = y;
+  hasSelection = false;
+  cropSel.style.display = 'none';
+  cropAddBtn.disabled = true;
+  document.body.style.userSelect = 'none';
+});
+
+document.addEventListener('mousemove', e => {
+  if (!dragMode) return;
+  const y = wrapY(e);
+  if (dragMode === 'new') {
+    selY1 = y;
+    hasSelection = true;
+    updateSelOverlay();
+  } else if (dragMode === 'top') {
+    const dy = e.clientY - dragAnchorY;
+    selY0 = dragAnchorSel.y0 + dy;
+    selY1 = dragAnchorSel.y1;
+    hasSelection = true;
+    updateSelOverlay();
+  } else if (dragMode === 'bot') {
+    const dy = e.clientY - dragAnchorY;
+    selY0 = dragAnchorSel.y0;
+    selY1 = dragAnchorSel.y1 + dy;
+    hasSelection = true;
+    updateSelOverlay();
+  }
+});
+
+document.addEventListener('mouseup', e => {
+  if (!dragMode) return;
+  const finalTop = Math.min(selY0, selY1);
+  const finalBot = Math.max(selY0, selY1);
+  if (hasSelection && (finalBot - finalTop) > 5) {
+    selY0 = finalTop;
+    selY1 = finalBot;
+    cropAddBtn.disabled = false;
+  } else if (dragMode === 'new') {
+    hasSelection = false;
+    cropSel.style.display = 'none';
+    cropAddBtn.disabled = true;
+  }
+  dragMode = null;
+  document.body.style.userSelect = '';
+});
+
+// ─── 結果に追加 ───
+cropAddBtn.addEventListener('click', async () => {
+  if (!hasSelection || !cropPageObj) return;
+
+  const outScale = parseFloat(document.getElementById('outscale').value) || 2;
+  const hm       = parseInt(document.getElementById('hmargin').value) || 40;
+
+  // CSS座標 → canvas座標 → hi-res座標
+  const wrapW = cropCanvasWrap.clientWidth;
+  const cssToCanvas = cropCanvas.width / wrapW;
+  const canvasToHi  = outScale / cropScale;
+
+  const top = Math.min(selY0, selY1);
+  const bot = Math.max(selY0, selY1);
+
+  // Y: CSS → canvas → hi-res
+  const hy0 = Math.round(top * cssToCanvas * canvasToHi);
+  const hy1 = Math.round(bot * cssToCanvas * canvasToHi);
+
+  // X: hmarginベース（PDF座標 → hi-res）
+  const hx0 = Math.round(hm      * outScale);
+  const hx1 = Math.round((cropBaseW - hm) * outScale);
+
+  const W = hx1 - hx0, H = hy1 - hy0;
+  if (W <= 0 || H <= 0) return;
+
+  const hiVP = cropPageObj.getViewport({ scale: outScale });
+  const off  = document.createElement('canvas');
+  off.width  = hiVP.width;
+  off.height = hiVP.height;
+  const offCtx = off.getContext('2d');
+  offCtx.fillStyle = '#fff';
+  offCtx.fillRect(0, 0, off.width, off.height);
+  await cropPageObj.render({ canvasContext: offCtx, viewport: hiVP }).promise;
+
+  const out = document.createElement('canvas');
+  out.width = W; out.height = H;
+  const outCtx = out.getContext('2d');
+  outCtx.fillStyle = '#fff';
+  outCtx.fillRect(0, 0, W, H);
+  outCtx.drawImage(off, hx0, hy0, W, H, 0, 0, W, H);
+
+  let fname = cropFilename.value.trim();
+  if (!fname) {
+    const year    = document.getElementById('year').value.trim()    || 'r7';
+    const subject = document.getElementById('subject').value.trim() || 'X';
+    const pn      = document.getElementById('cropPageNum').value;
+    fname = `${year}_${subject}_manual_p${pn}_${nextUid}.png`;
+  }
+  if (!fname.endsWith('.png')) fname += '.png';
+
+  const dataUrl = out.toDataURL('image/png');
+  results.push({ uid: nextUid, filename: fname, dataUrl });
+  addCard(fname, dataUrl, nextUid++);
+  prevSec.style.display = 'block';
+  zipBtn.disabled = false;
+  cropHint.textContent = `✓ 追加しました: ${fname}`;
+  cropFilename.value = '';
+  hasSelection = false;
+  cropSel.style.display = 'none';
+  cropAddBtn.disabled = true;
+});
+</script>
+</body>
+</html>

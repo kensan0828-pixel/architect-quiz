@@ -42,6 +42,22 @@ export default function App() {
   if (loading) return <div style={{ padding: 24 }}>問題を読み込み中...</div>;
   if (error)   return <div style={{ padding: 24, color: "red" }}>エラー: {error}</div>;
 
+  // 年度文字列を西暦数値に変換（ソート用）
+  function yearToNumber(year) {
+    if (year === "令和元年") return 2019;
+    const reiwa = year.match(/令和(\d+)年/);
+    if (reiwa) return 2018 + parseInt(reiwa[1]);
+    const heisei = year.match(/平成(\d+)年/);
+    if (heisei) return 1988 + parseInt(heisei[1]);
+    return 0;
+  }
+
+  // 問題番号から No. の数値を抽出（順番出題用）
+  function getQuestionNo(q) {
+    const match = q.問題番号?.match(/No\.(\d+)/);
+    return match ? parseInt(match[1]) : 0;
+  }
+
   const SUBJECT_ORDER = [
     "学科Ⅰ（計画）",
     "学科Ⅱ（環境・設備）",
@@ -51,7 +67,8 @@ export default function App() {
   ];
   const existingSubjects = new Set(questions.map((q) => q.科目).filter(Boolean));
   const subjects = [ALL, ...SUBJECT_ORDER.filter((s) => existingSubjects.has(s))];
-  const years    = [ALL, ...Array.from(new Set(questions.map((q) => q.年度).filter(Boolean))).sort().reverse()];
+  const years    = [ALL, ...Array.from(new Set(questions.map((q) => q.年度).filter(Boolean)))
+    .sort((a, b) => yearToNumber(b) - yearToNumber(a))];
 
   const filtered = questions.filter((q) => {
     const matchSubject = filterSubject === ALL || q.科目 === filterSubject;
@@ -107,7 +124,9 @@ export default function App() {
     </div>
   );
 
-  const displayList = shuffledOrder ? shuffledOrder.map(i => filtered[i]) : filtered;
+  const displayList = shuffledOrder
+    ? shuffledOrder.map(i => filtered[i])
+    : [...filtered].sort((a, b) => getQuestionNo(a) - getQuestionNo(b));
   const q = displayList[currentIndex];
   if (!q) return <div style={{ padding: 24 }}>問題を読み込み中...</div>;
 

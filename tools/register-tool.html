@@ -370,6 +370,11 @@
           <option value="令和5年">令和5年</option>
           <option value="令和4年">令和4年</option>
           <option value="令和3年">令和3年</option>
+          <option value="令和2年">令和2年</option>
+          <option value="令和元年">令和元年</option>
+          <option value="平成30年">平成30年</option>
+          <option value="平成29年">平成29年</option>
+          <option value="平成28年">平成28年</option>
         </select>
       </div>
     </div>
@@ -573,7 +578,7 @@ ${subject}の問題（問題番号：${nums}）の正答のみを抽出してく
 
     try {
       const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${key}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -648,7 +653,8 @@ ${subject}の問題（問題番号：${nums}）の正答のみを抽出してく
     document.getElementById('preview-section').classList.remove('show');
 
     const prompt = `このPDFは一級建築士試験（${year}・${subject}）の過去問題集です。
-全ての問題を抽出して、以下のJSON配列形式のみで返してください。
+「${subject}」の問題のみを抽出して、以下のJSON配列形式のみで返してください。
+他の科目の問題（例：学科Ⅳ、学科Ⅴ等）が含まれている場合は、それらは無視してください。
 マークダウンのコードブロック（\`\`\`）は絶対に使わないでください。JSONのみを返してください。
 
 [
@@ -675,7 +681,7 @@ ${subject}の問題（問題番号：${nums}）の正答のみを抽出してく
 
     try {
       const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${key}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -711,28 +717,46 @@ ${subject}の問題（問題番号：${nums}）の正答のみを抽出してく
         .replace(/^\d+\s*KB\s*/i, '')     // "527 KB" などのファイルサイズ表示除去
         .trim();
 
+      // ブラケット対応追跡でJSON配列を正確に抽出する関数
+      function extractJSONArray(str) {
+        const start = str.indexOf('[');
+        if (start === -1) return null;
+        let depth = 0, inString = false, escape = false;
+        for (let i = start; i < str.length; i++) {
+          const c = str[i];
+          if (escape) { escape = false; continue; }
+          if (c === '\\' && inString) { escape = true; continue; }
+          if (c === '"') { inString = !inString; continue; }
+          if (inString) continue;
+          if (c === '[' || c === '{') depth++;
+          else if (c === ']' || c === '}') {
+            depth--;
+            if (depth === 0) return str.slice(start, i + 1);
+          }
+        }
+        return null;
+      }
+
       // まず全体をJSONとしてパースを試みる
       let parsed = null;
       try {
         parsed = JSON.parse(jsonText);
       } catch (_) {
-        // [ ... ] を探して抽出
-        const startIdx = jsonText.indexOf('[');
-        const endIdx = jsonText.lastIndexOf(']');
-        if (startIdx === -1 || endIdx === -1) {
+        // ブラケット対応追跡で正確にJSON配列部分を抽出
+        const extracted = extractJSONArray(jsonText);
+        if (!extracted) {
           const rawBox = document.getElementById('raw-response');
           rawBox.style.display = 'block';
           rawBox.textContent = text.slice(0, 2000);
           throw new Error('JSON配列が見つかりませんでした。下の「Gemini生レスポンス」を確認してください。');
         }
         try {
-          parsed = JSON.parse(jsonText.slice(startIdx, endIdx + 1));
+          parsed = JSON.parse(extracted);
         } catch (e2) {
           const rawBox = document.getElementById('raw-response');
           rawBox.style.display = 'block';
           rawBox.textContent = text.slice(0, 2000);
-          // 途中で切れている可能性をチェック
-          const isTruncated = !text.trimEnd().endsWith(']');
+          const isTruncated = !extracted.trimEnd().endsWith(']');
           if (isTruncated) {
             throw new Error('Geminiの出力が途中で切れました。PDFのページ数が多すぎる可能性があります。PDFを前半・後半に分割してお試しください。');
           }
@@ -741,10 +765,23 @@ ${subject}の問題（問題番号：${nums}）の正答のみを抽出してく
       }
 
       parsedQuestions = Array.isArray(parsed) ? parsed : [parsed];
+
+      // 科目フィルタリング：指定した科目以外の問題を除外
+      const totalBefore = parsedQuestions.length;
+      parsedQuestions = parsedQuestions.filter(q => q.科目 === subject);
+      const filtered = totalBefore - parsedQuestions.length;
+      if (filtered > 0) {
+        console.log(`科目フィルタ: ${totalBefore}問 → ${parsedQuestions.length}問（${filtered}問を除外）`);
+      }
+      if (parsedQuestions.length === 0) {
+        throw new Error(`「${subject}」の問題が見つかりませんでした。科目の選択を確認してください。`);
+      }
+
       // 正答PDFセクションを表示（プレビューは正答マージ後に表示）
       document.getElementById('answer-section').style.display = 'block';
       document.getElementById('answer-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
-      showAlert('parse-alert', 'success', `✅ ${parsedQuestions.length}問を抽出しました！次に正答PDFを読み込んでください。`);
+      const filterMsg = filtered > 0 ? `（他科目${filtered}問を除外）` : '';
+      showAlert('parse-alert', 'success', `✅ ${parsedQuestions.length}問を抽出しました！${filterMsg}次に正答PDFを読み込んでください。`);
 
     } catch (e) {
       showAlert('parse-alert', 'error', `❌ エラー: ${e.message}`);
