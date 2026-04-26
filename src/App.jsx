@@ -24,7 +24,7 @@ export default function App() {
   const [answeredCount, setAnsweredCount] = useState(0);
 
   useEffect(() => {
-    fetch("http://localhost:8000/api/questions")
+    fetch(`${import.meta.env.VITE_API_URL || "http://localhost:8000"}/api/questions`)
       .then((res) => {
         if (!res.ok) throw new Error("取得失敗");
         return res.json();
