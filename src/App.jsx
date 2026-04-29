@@ -22,6 +22,10 @@ export default function App() {
   const [shuffledOrder, setShuffledOrder] = useState(null);
   const [correctCount, setCorrectCount] = useState(0);
   const [answeredCount, setAnsweredCount] = useState(0);
+  const [history, setHistory] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("architect_quiz_history") || "{}"); }
+    catch { return {}; }
+  });
 
   useEffect(() => {
     fetch(`${import.meta.env.VITE_API_URL || "http://localhost:8000"}/api/questions`)
@@ -150,6 +154,15 @@ function handleSelect(index) {
   const correct = String(index + 1) === q.正答;
   setAnsweredCount((c) => c + 1);
   if (correct) setCorrectCount((c) => c + 1);
+
+  // 学習履歴をlocalStorageに保存
+  const key = `${q.年度}_${q.問題番号}`;
+  const updated = {
+    ...history,
+    [key]: { correct, selected: index + 1, answeredAt: new Date().toISOString() }
+  };
+  setHistory(updated);
+  localStorage.setItem("architect_quiz_history", JSON.stringify(updated));
 }
 
   function handleNext() {
@@ -188,7 +201,7 @@ function handleSelect(index) {
   {answeredCount > 0 ? (
     <>
       <span>
-        正答率 {Math.round(correctCount / answeredCount * 100)}%・{correctCount}/{answeredCount}問
+        今回 {Math.round(correctCount / answeredCount * 100)}%・{correctCount}/{answeredCount}問
       </span>
       <button onClick={() => { setCorrectCount(0); setAnsweredCount(0); }} style={{
         padding: "2px 10px", borderRadius: 6, border: "1.5px solid #e5e7eb",
@@ -200,13 +213,33 @@ function handleSelect(index) {
   ) : (
     <span>正答率 —</span>
   )}
+  {(() => {
+    const vals = Object.values(history);
+    if (vals.length === 0) return null;
+    const totalCorrect = vals.filter(v => v.correct).length;
+    return (
+      <span style={{ color: "#374151" }}>
+        ｜累計 {Math.round(totalCorrect / vals.length * 100)}%・{totalCorrect}/{vals.length}問
+        <button onClick={() => {
+          if (!confirm("学習履歴をすべて削除しますか？")) return;
+          localStorage.removeItem("architect_quiz_history");
+          setHistory({});
+        }} style={{
+          marginLeft: 8, padding: "2px 8px", borderRadius: 6, border: "1.5px solid #e5e7eb",
+          background: "#fff", color: "#9ca3af", fontSize: 11, cursor: "pointer",
+        }}>
+          履歴クリア
+        </button>
+      </span>
+    );
+  })()}
 </div>
 
       <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>
         {currentIndex + 1} / {displayList.length} 問
       </div>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
         <span style={{ fontSize: 14, color: "#6b7280" }}>{q.問題番号}</span>
         <span style={{
           fontSize: 13, padding: "2px 10px", borderRadius: 99,
@@ -215,6 +248,20 @@ function handleSelect(index) {
           {q.科目}
         </span>
         <span style={{ fontSize: 13, color: "#6b7280" }}>{q.年度}</span>
+        {(() => {
+          const rec = history[`${q.年度}_${q.問題番号}`];
+          if (!rec) return null;
+          return (
+            <span style={{
+              fontSize: 12, padding: "2px 8px", borderRadius: 99,
+              background: rec.correct ? "#dcfce7" : "#fee2e2",
+              color: rec.correct ? "#15803d" : "#dc2626",
+              fontWeight: "bold",
+            }}>
+              {rec.correct ? "✅ 前回正解" : "❌ 前回不正解"}
+            </span>
+          );
+        })()}
       </div>
 
       <div style={{
