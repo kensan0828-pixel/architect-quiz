@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import Dashboard from "./components/Dashboard";
 
 const SUBJECT_COLORS = {
   "学科Ⅰ（計画）":      { bg: "#ede9fe", color: "#7c3aed" },
@@ -37,6 +38,7 @@ export default function App() {
   const [weakMode, setWeakMode] = useState(false);
   const [sessionAnswers, setSessionAnswers] = useState([]); // [{correct, selected}] indexed by question position
   const [sessionComplete, setSessionComplete] = useState(false);
+  const [showDashboard, setShowDashboard] = useState(false);
 
   // localStorage: { "年度_問題番号": { attempts: N, correctCount: N } }
   const [history, setHistory] = useState(() => {
@@ -62,6 +64,7 @@ export default function App() {
 
   if (loading) return <div style={{ padding: 24 }}>問題を読み込み中...</div>;
   if (error)   return <div style={{ padding: 24, color: "red" }}>エラー: {error}</div>;
+  if (showDashboard) return <Dashboard onBack={() => setShowDashboard(false)} />;
 
   function yearToNumber(year) {
     if (year === "令和元年") return 2019;
@@ -364,6 +367,13 @@ export default function App() {
           fontSize: 14, cursor: "pointer", fontWeight: "bold",
         }}>
           📊 苦手順{weakMode ? "（解除）" : ""}
+        </button>
+        <button onClick={() => setShowDashboard(true)} style={{
+          padding: "6px 14px", borderRadius: 8, border: "1.5px solid #0891b2",
+          background: "#fff", color: "#0891b2",
+          fontSize: 14, cursor: "pointer", fontWeight: "bold",
+        }}>
+          📈 進捗確認
         </button>
         {shuffledOrder && (
           <button onClick={handleResetOrder} style={{
