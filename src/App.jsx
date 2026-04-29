@@ -34,6 +34,7 @@ export default function App() {
   const [filterSubject, setFilterSubject] = useState(ALL);
   const [filterYear, setFilterYear] = useState(ALL);
   const [shuffledOrder, setShuffledOrder] = useState(null);
+  const [weakMode, setWeakMode] = useState(false);
   const [sessionAnswers, setSessionAnswers] = useState([]); // [{correct, selected}] indexed by question position
   const [sessionComplete, setSessionComplete] = useState(false);
 
@@ -113,23 +114,33 @@ export default function App() {
 
   function handleShuffle() {
     setShuffledOrder(shuffle(filtered));
+    setWeakMode(false);
     resetSession();
   }
 
   function handleResetOrder() {
     setShuffledOrder(null);
+    setWeakMode(false);
+    resetSession();
+  }
+
+  function handleWeakMode() {
+    setShuffledOrder(null);
+    setWeakMode(true);
     resetSession();
   }
 
   function handleSubjectChange(val) {
     setFilterSubject(val);
     setShuffledOrder(null);
+    setWeakMode(false);
     resetSession();
   }
 
   function handleYearChange(val) {
     setFilterYear(val);
     setShuffledOrder(null);
+    setWeakMode(false);
     resetSession();
   }
 
@@ -142,15 +153,37 @@ export default function App() {
     </div>
   );
 
+  // 正答率を返すヘルパー（未回答は null）
+  function getCorrectRate(q) {
+    const rec = history[`${q.年度}_${q.問題番号}`];
+    if (!rec || !("attempts" in rec) || rec.attempts === 0) return null;
+    return rec.correctCount / rec.attempts;
+  }
+
+  const defaultSort = (a, b) => {
+    const yearDiff = yearToNumber(b.年度) - yearToNumber(a.年度);
+    if (yearDiff !== 0) return yearDiff;
+    const subjectDiff = SUBJECT_ORDER.indexOf(a.科目) - SUBJECT_ORDER.indexOf(b.科目);
+    if (subjectDiff !== 0) return subjectDiff;
+    return getQuestionNo(a) - getQuestionNo(b);
+  };
+
   const displayList = shuffledOrder
     ? shuffledOrder.map(i => filtered[i])
-    : [...filtered].sort((a, b) => {
-        const yearDiff = yearToNumber(b.年度) - yearToNumber(a.年度);
-        if (yearDiff !== 0) return yearDiff;
-        const subjectDiff = SUBJECT_ORDER.indexOf(a.科目) - SUBJECT_ORDER.indexOf(b.科目);
-        if (subjectDiff !== 0) return subjectDiff;
-        return getQuestionNo(a) - getQuestionNo(b);
-      });
+    : weakMode
+      ? [...filtered].sort((a, b) => {
+          const ra = getCorrectRate(a);
+          const rb = getCorrectRate(b);
+          // 両方未回答→元の順
+          if (ra === null && rb === null) return defaultSort(a, b);
+          // 未回答は末尾
+          if (ra === null) return 1;
+          if (rb === null) return -1;
+          // 正答率昇順（苦手が先）
+          if (ra !== rb) return ra - rb;
+          return defaultSort(a, b);
+        })
+      : [...filtered].sort(defaultSort);
 
   // ── セッション完了画面 ──
   if (sessionComplete) {
@@ -206,6 +239,7 @@ export default function App() {
             const ans = sessionAnswers[i];
             const correct = ans?.correct;
             const subColor = SUBJECT_COLORS[q.科目] || { bg: "#f3f4f6", color: "#374151" };
+            const rate = getCorrectRate(q);
             return (
               <div key={i} style={{
                 display: "flex", alignItems: "center", gap: 10,
@@ -228,6 +262,15 @@ export default function App() {
                   {q.問題文?.slice(0, 36)}…
                 </span>
                 <span style={{ fontSize: 12, color: "#6b7280", whiteSpace: "nowrap" }}>正答: {q.正答}</span>
+                {rate !== null && (
+                  <span style={{
+                    fontSize: 11, whiteSpace: "nowrap",
+                    color: rate < 0.5 ? "#dc2626" : rate < 0.8 ? "#d97706" : "#15803d",
+                    fontWeight: "bold",
+                  }}>
+                    累計{Math.round(rate * 100)}%
+                  </span>
+                )}
               </div>
             );
           })}
@@ -299,7 +342,7 @@ export default function App() {
       <FilterBar subjects={subjects} years={years} filterSubject={filterSubject} filterYear={filterYear}
         onSubjectChange={handleSubjectChange} onYearChange={handleYearChange} />
 
-      <div style={{ marginBottom: 16, display: "flex", gap: 8 }}>
+      <div style={{ marginBottom: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
         <button onClick={handleShuffle} style={{
           padding: "6px 14px", borderRadius: 8, border: "1.5px solid #6366f1",
           background: shuffledOrder ? "#6366f1" : "#fff",
@@ -307,6 +350,14 @@ export default function App() {
           fontSize: 14, cursor: "pointer", fontWeight: "bold",
         }}>
           🔀 シャッフル{shuffledOrder ? "中" : ""}
+        </button>
+        <button onClick={weakMode ? handleResetOrder : handleWeakMode} style={{
+          padding: "6px 14px", borderRadius: 8, border: "1.5px solid #dc2626",
+          background: weakMode ? "#dc2626" : "#fff",
+          color: weakMode ? "#fff" : "#dc2626",
+          fontSize: 14, cursor: "pointer", fontWeight: "bold",
+        }}>
+          📊 苦手順{weakMode ? "（解除）" : ""}
         </button>
         {shuffledOrder && (
           <button onClick={handleResetOrder} style={{
@@ -317,6 +368,11 @@ export default function App() {
           </button>
         )}
       </div>
+      {weakMode && (
+        <div style={{ fontSize: 12, color: "#dc2626", marginBottom: 8, padding: "6px 12px", background: "#fef2f2", borderRadius: 6 }}>
+          ⚠️ 累計正答率の低い順に出題しています。未回答の問題は末尾に表示されます。
+        </div>
+      )}
 
       {/* セッション内進捗 */}
       <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
@@ -350,6 +406,18 @@ export default function App() {
           {q.科目}
         </span>
         <span style={{ fontSize: 13, color: "#6b7280" }}>{q.年度}</span>
+        {(() => {
+          const rate = getCorrectRate(q);
+          if (rate === null) return <span style={{ fontSize: 12, color: "#9ca3af" }}>未回答</span>;
+          const pct = Math.round(rate * 100);
+          const col = rate < 0.5 ? "#dc2626" : rate < 0.8 ? "#d97706" : "#15803d";
+          const bg  = rate < 0.5 ? "#fee2e2" : rate < 0.8 ? "#fef3c7" : "#dcfce7";
+          return (
+            <span style={{ fontSize: 12, padding: "2px 8px", borderRadius: 99, background: bg, color: col, fontWeight: "bold" }}>
+              累計正答率 {pct}%
+            </span>
+          );
+        })()}
       </div>
 
       <div style={{
