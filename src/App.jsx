@@ -125,7 +125,26 @@ export default function App() {
   }
 
   function handleWeakMode() {
-    setShuffledOrder(null);
+    // 苦手順ソートをその時点で確定し shuffledOrder に固定する
+    // → historyが更新されても displayList が再ソートされない
+    const weakSorted = [...filtered]
+      .map((q, i) => ({ q, i }))
+      .sort(({ q: a }, { q: b }) => {
+        const getRate = q => {
+          const rec = history[`${q.年度}_${q.問題番号}`];
+          if (!rec || !("attempts" in rec) || rec.attempts === 0) return null;
+          return rec.correctCount / rec.attempts;
+        };
+        const ra = getRate(a);
+        const rb = getRate(b);
+        if (ra === null && rb === null) return 0;
+        if (ra === null) return 1;
+        if (rb === null) return -1;
+        if (ra !== rb) return ra - rb;
+        return 0;
+      })
+      .map(({ i }) => i);
+    setShuffledOrder(weakSorted);
     setWeakMode(true);
     resetSession();
   }
@@ -170,20 +189,7 @@ export default function App() {
 
   const displayList = shuffledOrder
     ? shuffledOrder.map(i => filtered[i])
-    : weakMode
-      ? [...filtered].sort((a, b) => {
-          const ra = getCorrectRate(a);
-          const rb = getCorrectRate(b);
-          // 両方未回答→元の順
-          if (ra === null && rb === null) return defaultSort(a, b);
-          // 未回答は末尾
-          if (ra === null) return 1;
-          if (rb === null) return -1;
-          // 正答率昇順（苦手が先）
-          if (ra !== rb) return ra - rb;
-          return defaultSort(a, b);
-        })
-      : [...filtered].sort(defaultSort);
+    : [...filtered].sort(defaultSort);
 
   // ── セッション完了画面 ──
   if (sessionComplete) {
