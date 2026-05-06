@@ -43,6 +43,8 @@ export default function App() {
   const [showMockExam, setShowMockExam]   = useState(false);
   const [aiExplanation, setAiExplanation] = useState(null);
   const [loadingAI, setLoadingAI]         = useState(false);
+  const [articleLinks, setArticleLinks]   = useState(null);
+  const [loadingArticles, setLoadingArticles] = useState(false);
 
   // localStorage: { "年度_問題番号": { attempts: N, correctCount: N } }
   const [history, setHistory] = useState(() => {
@@ -120,6 +122,8 @@ export default function App() {
     setSessionComplete(false);
     setAiExplanation(null);
     setLoadingAI(false);
+    setArticleLinks(null);
+    setLoadingArticles(false);
   }
 
   function handleShuffle() {
@@ -345,6 +349,8 @@ export default function App() {
     const isLastQuestion = currentIndex + 1 >= displayList.length;
     setAiExplanation(null);
     setLoadingAI(false);
+    setArticleLinks(null);
+    setLoadingArticles(false);
     if (isLastQuestion) {
       setSessionComplete(true);
     } else {
@@ -460,6 +466,78 @@ export default function App() {
       }}>
         {q.問題文}
       </div>
+
+      {/* 関連条文ボタン（学科Ⅲのみ・回答前から表示） */}
+      {q.科目 === "学科Ⅲ（法規）" && (
+        <div style={{ marginBottom: 16 }}>
+          {!articleLinks && !loadingArticles && (
+            <button onClick={() => {
+              setLoadingArticles(true);
+              const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8000";
+              fetch(`${apiBase}/api/articles`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  question: q.問題文,
+                  choices: [q.選択肢1, q.選択肢2, q.選択肢3, q.選択肢4],
+                  year: q.年度,
+                  question_no: q.問題番号,
+                }),
+              })
+                .then(r => r.json())
+                .then(data => { setArticleLinks(data.articles); setLoadingArticles(false); })
+                .catch(() => { setArticleLinks([]); setLoadingArticles(false); });
+            }} style={{
+              padding: "6px 14px", borderRadius: 8,
+              border: "1.5px solid #0891b2", background: "#fff",
+              color: "#0891b2", fontSize: 13, fontWeight: "bold", cursor: "pointer",
+            }}>
+              📖 関連条文を見る
+            </button>
+          )}
+          {loadingArticles && (
+            <div style={{ fontSize: 13, color: "#6b7280" }}>📖 関連条文を検索中...</div>
+          )}
+          {articleLinks && articleLinks.length > 0 && (
+            <div style={{
+              padding: "12px 14px", borderRadius: 8,
+              background: "#f0f9ff", border: "1px solid #bae6fd",
+            }}>
+              <div style={{ fontSize: 12, fontWeight: "bold", color: "#0369a1", marginBottom: 8 }}>
+                📖 関連条文（ヒント）
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {articleLinks.map((a, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 13, color: "#0c4a6e", fontWeight: "bold" }}>
+                      {a.law} {a.article}
+                    </span>
+                    {a.title && (
+                      <span style={{ fontSize: 12, color: "#6b7280" }}>（{a.title}）</span>
+                    )}
+                    {a.url && (
+                      <a href={a.url} target="_blank" rel="noopener noreferrer" style={{
+                        fontSize: 11, color: "#0891b2", textDecoration: "underline",
+                      }}>
+                        e-Gov 🔗
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <button onClick={() => setArticleLinks(null)} style={{
+                marginTop: 8, fontSize: 11, color: "#9ca3af", background: "none",
+                border: "none", cursor: "pointer", padding: 0,
+              }}>
+                閉じる
+              </button>
+            </div>
+          )}
+          {articleLinks && articleLinks.length === 0 && (
+            <div style={{ fontSize: 13, color: "#9ca3af" }}>関連条文が見つかりませんでした。</div>
+          )}
+        </div>
+      )}
 
       {q.図表URL && (
         <div style={{ marginBottom: 24, textAlign: "center" }}>

@@ -200,3 +200,79 @@ def explain(req: ExplainRequest):
         messages=[{"role": "user", "content": prompt}],
     )
     return {"explanation": response.content[0].text}
+
+
+# ── e-Gov 法令 ID マッピング ──
+LAW_EGOV = {
+    "建築基準法":           "325AC0000000201",
+    "建築基準法施行令":     "325CO0000000338",
+    "建築基準法施行規則":   "325M50000000040",
+    "建築士法":             "325AC0000000202",
+    "建築士法施行令":       "325CO0000000350",
+    "建築士法施行規則":     "325M50000000004",
+    "都市計画法":           "343AC0000000100",
+    "都市計画法施行令":     "343CO0000000158",
+    "消防法":               "323AC0000000186",
+    "消防法施行令":         "336CO0000000037",
+    "消防法施行規則":       "336M50000000006",
+    "バリアフリー法":       "418AC0000000091",
+    "長期優良住宅法":       "421AC0000000087",
+    "住宅品確法":           "411AC0000000081",
+    "建設業法":             "324AC0000000100",
+    "建設業法施行令":       "324CO0000000273",
+    "宅地造成等規制法":     "336AC0000000191",
+    "土地区画整理法":       "329AC0000000119",
+}
+
+
+class ArticleRequest(BaseModel):
+    question: str
+    choices: list[str]
+    year: str
+    question_no: str
+
+
+@app.post("/api/articles")
+def get_articles(req: ArticleRequest):
+    choices_text = "\n".join(
+        [f"{i+1}. {c}" for i, c in enumerate(req.choices) if c]
+    )
+
+    prompt = f"""あなたは一級建築士試験（学科Ⅲ法規）の専門家です。
+以下の問題に関連する法令条文を特定してください。
+
+【問題文】{req.question}
+
+【選択肢】
+{choices_text}
+
+この問題を解くために参照すべき条文を3〜5件、以下のJSON形式で返してください。
+URLや説明文は不要です。JSONのみを返してください。マークダウン記法（```）は使わないでください。
+
+[
+  {{"law": "建築基準法", "article": "第28条", "title": "居室の採光及び換気"}},
+  {{"law": "建築基準法施行令", "article": "第19条", "title": "採光に有効な部分の面積"}}
+]
+
+lawには正式な法令名（例：建築基準法、建築基準法施行令、建築士法、都市計画法、消防法 など）を使用してください。"""
+
+    response = anthropic_client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=400,
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    import json as json_module
+    raw = response.content[0].text.strip()
+    try:
+        articles = json_module.loads(raw)
+    except Exception:
+        # JSON パース失敗時は空リストを返す
+        return {"articles": []}
+
+    # e-Gov URL を付与
+    for a in articles:
+        law_id = LAW_EGOV.get(a.get("law", ""))
+        a["url"] = f"https://elaws.e-gov.go.jp/document?lawid={law_id}" if law_id else ""
+
+    return {"articles": articles}
