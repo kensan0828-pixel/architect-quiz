@@ -41,6 +41,8 @@ export default function App() {
   const [sessionComplete, setSessionComplete] = useState(false);
   const [showDashboard, setShowDashboard] = useState(false);
   const [showMockExam, setShowMockExam]   = useState(false);
+  const [aiExplanation, setAiExplanation] = useState(null);
+  const [loadingAI, setLoadingAI]         = useState(false);
 
   // localStorage: { "年度_問題番号": { attempts: N, correctCount: N } }
   const [history, setHistory] = useState(() => {
@@ -116,6 +118,8 @@ export default function App() {
     setShowResult(false);
     setSessionAnswers([]);
     setSessionComplete(false);
+    setAiExplanation(null);
+    setLoadingAI(false);
   }
 
   function handleShuffle() {
@@ -338,6 +342,9 @@ export default function App() {
   }
 
   function handleNext() {
+    const isLastQuestion = currentIndex + 1 >= displayList.length;
+    setAiExplanation(null);
+    setLoadingAI(false);
     if (isLastQuestion) {
       setSessionComplete(true);
     } else {
@@ -507,7 +514,55 @@ export default function App() {
             );
           })()}
           {!isCorrect && q.解説 && (
-            <div style={{ fontSize: 14, color: "#374151", lineHeight: 1.7 }}>{q.解説}</div>
+            <div style={{ fontSize: 14, color: "#374151", lineHeight: 1.7, marginBottom: 10 }}>{q.解説}</div>
+          )}
+          {/* AI解説ボタン */}
+          {!aiExplanation && !loadingAI && (
+            <button onClick={() => {
+              setLoadingAI(true);
+              const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8000";
+              fetch(`${apiBase}/api/explain`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  question: q.問題文,
+                  choices: [q.選択肢1, q.選択肢2, q.選択肢3, q.選択肢4],
+                  correct_answer: q.正答,
+                  user_answer: String(selected + 1),
+                  subject: q.科目,
+                  year: q.年度,
+                  question_no: q.問題番号,
+                  static_explanation: q.解説 || "",
+                  is_correct: isCorrect,
+                }),
+              })
+                .then(r => r.json())
+                .then(data => { setAiExplanation(data.explanation); setLoadingAI(false); })
+                .catch(() => { setAiExplanation("解説の取得に失敗しました。"); setLoadingAI(false); });
+            }} style={{
+              marginTop: 8, padding: "6px 14px", borderRadius: 8,
+              border: "1.5px solid #6366f1", background: "#fff",
+              color: "#6366f1", fontSize: 13, fontWeight: "bold", cursor: "pointer",
+            }}>
+              🤖 AI解説を見る
+            </button>
+          )}
+          {loadingAI && (
+            <div style={{ marginTop: 8, fontSize: 13, color: "#6b7280" }}>🤖 AI解説を生成中...</div>
+          )}
+          {aiExplanation && (
+            <div style={{
+              marginTop: 12, padding: "12px 14px", borderRadius: 8,
+              background: isCorrect ? "#eff6ff" : "#fffbeb",
+              border: `1px solid ${isCorrect ? "#bfdbfe" : "#fde68a"}`,
+            }}>
+              <div style={{ fontSize: 12, fontWeight: "bold", color: isCorrect ? "#1d4ed8" : "#d97706", marginBottom: 6 }}>
+                🤖 AI解説
+              </div>
+              <div style={{ fontSize: 14, color: "#374151", lineHeight: 1.8, whiteSpace: "pre-wrap" }}>
+                {aiExplanation}
+              </div>
+            </div>
           )}
         </div>
       )}
