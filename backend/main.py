@@ -333,7 +333,10 @@ labelには「法令名 条文番号」の形式で記載してください。""
     )
 
     import json as json_module
+    import re as re_module
     raw = response.content[0].text.strip()
+    # マークダウンのコードブロック（```json ... ``` や ``` ... ```）を除去
+    raw = re_module.sub(r"```(?:json)?\s*", "", raw).strip()
     try:
         items = json_module.loads(raw)
     except Exception:
