@@ -467,77 +467,89 @@ export default function App() {
         {q.問題文}
       </div>
 
-      {/* 関連条文ボタン（学科Ⅲのみ・回答前から表示） */}
-      {q.科目 === "学科Ⅲ（法規）" && (
-        <div style={{ marginBottom: 16 }}>
-          {!articleLinks && !loadingArticles && (
-            <button onClick={() => {
-              setLoadingArticles(true);
-              const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8000";
-              fetch(`${apiBase}/api/articles`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  question: q.問題文,
-                  choices: [q.選択肢1, q.選択肢2, q.選択肢3, q.選択肢4],
-                  year: q.年度,
-                  question_no: q.問題番号,
-                }),
-              })
-                .then(r => r.json())
-                .then(data => { setArticleLinks(data.articles); setLoadingArticles(false); })
-                .catch(() => { setArticleLinks([]); setLoadingArticles(false); });
-            }} style={{
-              padding: "6px 14px", borderRadius: 8,
-              border: "1.5px solid #0891b2", background: "#fff",
-              color: "#0891b2", fontSize: 13, fontWeight: "bold", cursor: "pointer",
-            }}>
-              📖 関連条文を見る
-            </button>
-          )}
-          {loadingArticles && (
-            <div style={{ fontSize: 13, color: "#6b7280" }}>📖 関連条文を検索中...</div>
-          )}
-          {articleLinks && articleLinks.length > 0 && (
-            <div style={{
-              padding: "12px 14px", borderRadius: 8,
-              background: "#f0f9ff", border: "1px solid #bae6fd",
-            }}>
-              <div style={{ fontSize: 12, fontWeight: "bold", color: "#0369a1", marginBottom: 8 }}>
-                📖 関連条文（ヒント）
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {articleLinks.map((a, i) => (
-                  <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 13, color: "#0c4a6e", fontWeight: "bold" }}>
-                      {a.law} {a.article}
-                    </span>
-                    {a.title && (
-                      <span style={{ fontSize: 12, color: "#6b7280" }}>（{a.title}）</span>
-                    )}
-                    {a.url && (
-                      <a href={a.url} target="_blank" rel="noopener noreferrer" style={{
-                        fontSize: 11, color: "#0891b2", textDecoration: "underline",
-                      }}>
-                        e-Gov 🔗
-                      </a>
-                    )}
-                  </div>
-                ))}
-              </div>
-              <button onClick={() => setArticleLinks(null)} style={{
-                marginTop: 8, fontSize: 11, color: "#9ca3af", background: "none",
-                border: "none", cursor: "pointer", padding: 0,
+      {/* ヒントボタン（全科目・回答前から表示） */}
+      {(() => {
+        const HINT_CONFIG = {
+          "学科Ⅰ（計画）":      { icon: "💡", label: "用語・基準を確認",   color: "#7c3aed", bg: "#f5f3ff", border: "#ddd6fe", heading: "💡 用語・基準（ヒント）" },
+          "学科Ⅱ（環境・設備）": { icon: "💡", label: "公式・基準を確認",   color: "#9d174d", bg: "#fdf4ff", border: "#f5d0fe", heading: "💡 公式・基準（ヒント）" },
+          "学科Ⅲ（法規）":      { icon: "📖", label: "関連条文を見る",     color: "#0891b2", bg: "#f0f9ff", border: "#bae6fd", heading: "📖 関連条文（ヒント）" },
+          "学科Ⅳ（構造）":      { icon: "💡", label: "公式・理論を確認",   color: "#92400e", bg: "#fffbeb", border: "#fde68a", heading: "💡 公式・理論（ヒント）" },
+          "学科Ⅴ（施工）":      { icon: "💡", label: "工法・基準を確認",   color: "#374151", bg: "#f9fafb", border: "#e5e7eb", heading: "💡 工法・基準（ヒント）" },
+        };
+        const cfg = HINT_CONFIG[q.科目];
+        if (!cfg) return null;
+        return (
+          <div style={{ marginBottom: 16 }}>
+            {!articleLinks && !loadingArticles && (
+              <button onClick={() => {
+                setLoadingArticles(true);
+                const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8000";
+                fetch(`${apiBase}/api/articles`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    question: q.問題文,
+                    choices: [q.選択肢1, q.選択肢2, q.選択肢3, q.選択肢4],
+                    subject: q.科目,
+                    year: q.年度,
+                    question_no: q.問題番号,
+                  }),
+                })
+                  .then(r => r.json())
+                  .then(data => { setArticleLinks(data.items); setLoadingArticles(false); })
+                  .catch(() => { setArticleLinks([]); setLoadingArticles(false); });
+              }} style={{
+                padding: "6px 14px", borderRadius: 8,
+                border: `1.5px solid ${cfg.color}`, background: "#fff",
+                color: cfg.color, fontSize: 13, fontWeight: "bold", cursor: "pointer",
               }}>
-                閉じる
+                {cfg.icon} {cfg.label}
               </button>
-            </div>
-          )}
-          {articleLinks && articleLinks.length === 0 && (
-            <div style={{ fontSize: 13, color: "#9ca3af" }}>関連条文が見つかりませんでした。</div>
-          )}
-        </div>
-      )}
+            )}
+            {loadingArticles && (
+              <div style={{ fontSize: 13, color: "#6b7280" }}>{cfg.icon} 検索中...</div>
+            )}
+            {articleLinks && articleLinks.length > 0 && (
+              <div style={{
+                padding: "12px 14px", borderRadius: 8,
+                background: cfg.bg, border: `1px solid ${cfg.border}`,
+              }}>
+                <div style={{ fontSize: 12, fontWeight: "bold", color: cfg.color, marginBottom: 8 }}>
+                  {cfg.heading}
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {articleLinks.map((a, i) => (
+                    <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 13, color: "#1e293b", fontWeight: "bold" }}>
+                        {a.label}
+                      </span>
+                      {a.detail && (
+                        <span style={{ fontSize: 12, color: "#6b7280" }}>（{a.detail}）</span>
+                      )}
+                      {a.url && (
+                        <a href={a.url} target="_blank" rel="noopener noreferrer" style={{
+                          fontSize: 11, color: "#0891b2", textDecoration: "underline",
+                        }}>
+                          e-Gov 🔗
+                        </a>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <button onClick={() => setArticleLinks(null)} style={{
+                  marginTop: 8, fontSize: 11, color: "#9ca3af", background: "none",
+                  border: "none", cursor: "pointer", padding: 0,
+                }}>
+                  閉じる
+                </button>
+              </div>
+            )}
+            {articleLinks && articleLinks.length === 0 && (
+              <div style={{ fontSize: 13, color: "#9ca3af" }}>ヒントが見つかりませんでした。</div>
+            )}
+          </div>
+        );
+      })()}
 
       {q.図表URL && (
         <div style={{ marginBottom: 24, textAlign: "center" }}>
