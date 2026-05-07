@@ -328,7 +328,7 @@ labelには「法令名 条文番号」の形式で記載してください。""
 
     response = anthropic_client.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=400,
+        max_tokens=800,  # 400 だと5件JSONが途中で切れてパース失敗するため増量
         messages=[{"role": "user", "content": prompt}],
     )
 
@@ -337,10 +337,20 @@ labelには「法令名 条文番号」の形式で記載してください。""
     raw = response.content[0].text.strip()
     # マークダウンのコードブロック（```json ... ``` や ``` ... ```）を除去
     raw = re_module.sub(r"```(?:json)?\s*", "", raw).strip()
+    raw = raw.rstrip("`").strip()
+    items = []
     try:
         items = json_module.loads(raw)
     except Exception:
-        return {"items": []}
+        # パース失敗時は文字列中の [...] を抽出して再試行
+        match = re_module.search(r'\[.*\]', raw, re_module.DOTALL)
+        if match:
+            try:
+                items = json_module.loads(match.group())
+            except Exception:
+                return {"items": []}
+        else:
+            return {"items": []}
 
     # 学科Ⅲのみ e-Gov URL を付与
     if req.subject == "学科Ⅲ（法規）":
