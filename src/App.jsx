@@ -482,6 +482,16 @@ export default function App() {
           <div style={{ marginBottom: 16 }}>
             {!articleLinks && !loadingArticles && (
               <button onClick={() => {
+                // Notionに手動登録ヒントがあればAPIを呼ばず即表示（ハイブリッド案3）
+                if (q.ヒント && q.ヒント.trim() !== "") {
+                  try {
+                    setArticleLinks(JSON.parse(q.ヒント));
+                  } catch {
+                    setArticleLinks([]);
+                  }
+                  return;
+                }
+                // 未登録の場合はAI生成にフォールバック
                 setLoadingArticles(true);
                 const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8000";
                 fetch(`${apiBase}/api/articles`, {

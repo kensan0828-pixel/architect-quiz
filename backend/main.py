@@ -82,6 +82,7 @@ def get_questions():
             "正答": get_select("正答"),
             "解説": get_text("解説"),
             "図表URL": get_text("図表URL"),
+            "ヒント": get_text("ヒント"),  # 手動登録ヒント（JSON文字列）
         })
 
     return questions
