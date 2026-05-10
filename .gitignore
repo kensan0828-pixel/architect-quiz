@@ -22,10 +22,13 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-.envS.env 
+.env 
 __pycache__
 
 # ローカル起動用バッチ
 start_quiz.bat
 
 tools/*.pdf
+tools/sogo_image/
+
+_
