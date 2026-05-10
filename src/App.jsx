@@ -533,6 +533,7 @@ export default function App() {
               <div style={{
                 padding: "12px 14px", borderRadius: 8,
                 background: cfg.bg, border: `1px solid ${cfg.border}`,
+                textAlign: "left",
               }}>
                 <div style={{ fontSize: 12, fontWeight: "bold", color: cfg.color, marginBottom: 8 }}>
                   {cfg.heading}
@@ -665,6 +666,7 @@ export default function App() {
               marginTop: 12, padding: "12px 14px", borderRadius: 8,
               background: isCorrect ? "#eff6ff" : "#fffbeb",
               border: `1px solid ${isCorrect ? "#bfdbfe" : "#fde68a"}`,
+              textAlign: "left",
             }}>
               <div style={{ fontSize: 12, fontWeight: "bold", color: isCorrect ? "#1d4ed8" : "#d97706", marginBottom: 6 }}>
                 🤖 AI解説
