@@ -2,6 +2,15 @@ import { useState, useEffect } from "react";
 import Dashboard from "./components/Dashboard";
 import MockExam from "./components/MockExam";
 
+// **text** をインライン <strong> にレンダリングするヘルパー
+function renderWithBold(text) {
+  if (!text) return null;
+  const parts = text.split(/\*\*(.*?)\*\*/g);
+  return parts.map((part, i) =>
+    i % 2 === 1 ? <strong key={i}>{part}</strong> : part
+  );
+}
+
 const SUBJECT_COLORS = {
   "学科Ⅰ（計画）":      { bg: "#ede9fe", color: "#7c3aed" },
   "学科Ⅱ（環境・設備）": { bg: "#fce7f3", color: "#9d174d" },
@@ -661,7 +670,7 @@ export default function App() {
                 🤖 AI解説
               </div>
               <div style={{ fontSize: 14, color: "#374151", lineHeight: 1.8, whiteSpace: "pre-wrap" }}>
-                {aiExplanation}
+                {renderWithBold(aiExplanation)}
               </div>
             </div>
           )}
