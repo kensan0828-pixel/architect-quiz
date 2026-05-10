@@ -503,6 +503,7 @@ export default function App() {
                     subject: q.科目,
                     year: q.年度,
                     question_no: q.問題番号,
+                    kaisetsu: q.解説 || "",
                   }),
                 })
                   .then(r => r.json())

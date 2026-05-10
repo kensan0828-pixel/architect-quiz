@@ -153,7 +153,7 @@ class ExplainRequest(BaseModel):
     subject: str
     year: str
     question_no: str
-    static_explanation: str = ""
+    static_explanation: str = ""  # Notionの解説フィールド（R1〜R7登録済み）
     is_correct: bool = False
 
 
@@ -163,8 +163,49 @@ def explain(req: ExplainRequest):
         [f"{i+1}. {c}" for i, c in enumerate(req.choices) if c]
     )
 
-    if req.is_correct:
-        prompt = f"""あなたは一級建築士試験の専門家です。
+    # ── R1〜R7：Notionの解説テキストを正として要約する ──
+    if req.static_explanation and req.static_explanation.strip():
+        if req.is_correct:
+            prompt = f"""あなたは一級建築士試験の解説専門家です。
+以下の公式解説テキストを情報源として、正解の理由をわかりやすくまとめてください。
+AIの独自知識ではなく、この解説テキストの内容を正として回答してください。
+
+【公式解説（総合資格）】
+{req.static_explanation}
+
+【科目】{req.subject}（{req.year} {req.question_no}）
+【問題文】{req.question}
+
+【選択肢】
+{choices_text}
+
+【正解】{req.correct_answer}番
+
+上記の解説をもとに、なぜ{req.correct_answer}番が正しいのかを200〜300字で簡潔にまとめてください。
+他の選択肢が誤りである理由も1〜2行で添えてください。"""
+        else:
+            prompt = f"""あなたは一級建築士試験の解説専門家です。
+以下の公式解説テキストを情報源として、誤答の理由と正解の解説をまとめてください。
+AIの独自知識ではなく、この解説テキストの内容を正として回答してください。
+
+【公式解説（総合資格）】
+{req.static_explanation}
+
+【科目】{req.subject}（{req.year} {req.question_no}）
+【問題文】{req.question}
+
+【選択肢】
+{choices_text}
+
+【正解】{req.correct_answer}番
+【受験者の回答】{req.user_answer}番（不正解）
+
+上記の解説をもとに、なぜ{req.user_answer}番が誤りで{req.correct_answer}番が正しいのかを200〜300字で簡潔にまとめてください。"""
+
+    # ── H28〜H30：解説未登録のためAI知識から生成 ──
+    else:
+        if req.is_correct:
+            prompt = f"""あなたは一級建築士試験の専門家です。
 以下の問題について、正解の理由をわかりやすく解説してください。
 
 【科目】{req.subject}（{req.year} {req.question_no}）
@@ -178,8 +219,8 @@ def explain(req: ExplainRequest):
 受験者は{req.correct_answer}番を選んで正解しました。
 「なぜ{req.correct_answer}番が正しいのか」を建築士試験の観点から200〜300字で解説してください。
 他の選択肢が誤りである理由も1〜2行で添えると理解が深まります。"""
-    else:
-        prompt = f"""あなたは一級建築士試験の専門家です。
+        else:
+            prompt = f"""あなたは一級建築士試験の専門家です。
 以下の問題について、誤答の理由と正解の解説をしてください。
 
 【科目】{req.subject}（{req.year} {req.question_no}）
@@ -190,7 +231,6 @@ def explain(req: ExplainRequest):
 
 【正解】{req.correct_answer}番
 【受験者の回答】{req.user_answer}番（不正解）
-{f'【参考解説】{req.static_explanation}' if req.static_explanation else ''}
 
 「なぜ{req.user_answer}番が誤りで、{req.correct_answer}番が正しいのか」を
 建築士試験の観点から200〜300字で解説してください。"""
@@ -232,6 +272,7 @@ class ArticleRequest(BaseModel):
     subject: str = "学科Ⅲ（法規）"
     year: str
     question_no: str
+    kaisetsu: str = ""  # Notionの解説フィールド（R1〜R7登録済み）
 
 
 @app.post("/api/articles")
@@ -240,8 +281,27 @@ def get_articles(req: ArticleRequest):
         [f"{i+1}. {c}" for i, c in enumerate(req.choices) if c]
     )
 
-    # 科目ごとのプロンプト切り替え
-    if req.subject == "学科Ⅲ（法規）":
+    # ── R1〜R7：Notionの解説テキストからキーポイントを抽出 ──
+    if req.kaisetsu and req.kaisetsu.strip():
+        prompt = f"""あなたは一級建築士試験の解説専門家です。
+以下の公式解説テキストから、この問題を解くためのキーポイントを抽出してください。
+AIの独自知識ではなく、解説テキストの内容を正として抽出してください。
+
+【科目】{req.subject}
+【問題文】{req.question}
+
+【公式解説（総合資格）】
+{req.kaisetsu}
+
+上記の解説から重要な用語・数値・基準・公式を3〜5件、以下のJSON形式のみで返してください。
+マークダウン記法（```）は使わないでください。
+
+[
+  {{"label": "用語・基準名", "detail": "内容・数値", "url": ""}}
+]"""
+
+    # ── H28〜H30：解説未登録のため科目別プロンプトでAI生成 ──
+    elif req.subject == "学科Ⅲ（法規）":
         prompt = f"""あなたは一級建築士試験（学科Ⅲ法規）の専門家です。
 以下の問題に関連する法令条文を特定してください。
 
@@ -353,7 +413,9 @@ labelには「法令名 条文番号」の形式で記載してください。""
         else:
             return {"items": []}
 
-    # 学科Ⅲのみ e-Gov URL を付与
+    # 学科Ⅲ（法規）のみ e-Gov URL を付与
+    # ただし kaisetsu ベースの場合はラベル形式が「法令名 条文番号」でない可能性があるため
+    # 法令名が LAW_EGOV に含まれる場合のみ付与する
     if req.subject == "学科Ⅲ（法規）":
         for a in items:
             label = a.get("label", "")
