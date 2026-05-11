@@ -13,7 +13,8 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "null", "https://architect-quiz-mocha.vercel.app"],
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -71,6 +72,7 @@ def get_questions():
 
         num = get_number("問題番号")
         questions.append({
+            "id": page["id"],
             "問題番号": f"No.{int(num)}" if num else "",
             "科目": get_select("科目"),
             "年度": get_select("年度"),
@@ -426,3 +428,39 @@ labelには「法令名 条文番号」の形式で記載してください。""
             a["url"] = f"https://elaws.e-gov.go.jp/document?lawid={law_id}" if law_id else ""
 
     return {"items": items}
+
+
+@app.patch("/api/question/{page_id}")
+def update_question(page_id: str, body: dict = Body(...)):
+    field_types = {
+        "問題文":  "rich_text",
+        "選択肢1": "rich_text",
+        "選択肢2": "rich_text",
+        "選択肢3": "rich_text",
+        "選択肢4": "rich_text",
+        "解説":    "rich_text",
+        "図表URL": "rich_text",
+        "ヒント":  "rich_text",
+        "正答":    "select",
+    }
+    properties = {}
+    for field, value in body.items():
+        t = field_types.get(field)
+        if not t:
+            continue
+        if t == "rich_text":
+            properties[field] = {
+                "rich_text": [{"text": {"content": value or ""}}]
+            }
+        elif t == "select":
+            properties[field] = {
+                "select": {"name": value} if value else None
+            }
+
+    res = httpx.patch(
+        f"{NOTION_API}/pages/{page_id}",
+        headers=HEADERS,
+        json={"properties": properties},
+        timeout=30.0,
+    )
+    return {"ok": res.status_code == 200, "status": res.status_code}
