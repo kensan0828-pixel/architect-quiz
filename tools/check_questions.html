@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>入力チェックツール — architect-quiz</title>
+<style>
+  :root {
+    --bg: #f7f6f3;
+    --surface: #ffffff;
+    --border: #e2e0d8;
+    --border-strong: #c8c5bb;
+    --text: #1a1917;
+    --text-muted: #6b6860;
+    --text-faint: #9e9b93;
+    --blue: #1a56a0;
+    --blue-light: #e8f0fb;
+    --green: #2d6a2d;
+    --green-light: #eaf3ea;
+    --red: #961f1f;
+    --red-light: #fceaea;
+    --amber: #8a5a00;
+    --amber-light: #fdf3e3;
+    --font: 'Hiragino Sans', 'Yu Gothic UI', 'Meiryo', sans-serif;
+    --mono: 'Menlo', 'Consolas', monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  /* ── Header ── */
+  #header {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  #header h1 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-muted);
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+  }
+
+  select {
+    font-family: var(--font);
+    font-size: 14px;
+    padding: 6px 10px;
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text);
+    cursor: pointer;
+    outline: none;
+  }
+  select:focus { border-color: var(--blue); }
+
+  #dots-wrap {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    align-items: center;
+    flex: 1;
+  }
+
+  .dot {
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    background: var(--border);
+    transition: transform 0.1s, opacity 0.1s;
+    border: 2px solid transparent;
+    flex-shrink: 0;
+  }
+  .dot:hover { transform: scale(1.2); }
+  .dot.active { border-color: var(--blue); }
+  .dot.ok { background: #3a6e3a; }
+  .dot.needs_fix { background: #b03a3a; }
+
+  #stats {
+    display: flex;
+    gap: 14px;
+    font-size: 13px;
+    margin-left: auto;
+    white-space: nowrap;
+  }
+  .stat-ok { color: var(--green); font-weight: 600; }
+  .stat-fix { color: var(--red); font-weight: 600; }
+  .stat-un { color: var(--text-muted); }
+
+  /* ── Main ── */
+  #main {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 20px 20px 60px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  /* ── Nav bar ── */
+  #nav-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 16px;
+  }
+
+  #nav-title {
+    flex: 1;
+    text-align: center;
+    font-size: 15px;
+    font-weight: 600;
+  }
+  #nav-pos {
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--text-muted);
+    margin-left: 6px;
+  }
+
+  .btn-nav {
+    background: none;
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    padding: 6px 14px;
+    cursor: pointer;
+    font-size: 16px;
+    color: var(--text);
+    transition: background 0.1s;
+  }
+  .btn-nav:hover:not(:disabled) { background: var(--bg); }
+  .btn-nav:disabled { opacity: 0.3; cursor: default; }
+
+  /* ── Field card ── */
+  .field-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    transition: border-color 0.15s;
+  }
+  .field-card.modified {
+    border-color: #c8870a;
+    background: #fffdf5;
+  }
+
+  .field-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .field-card.modified .field-label {
+    color: var(--amber);
+  }
+
+  textarea {
+    width: 100%;
+    border: none;
+    outline: none;
+    resize: vertical;
+    background: transparent;
+    font-family: var(--font);
+    font-size: 14px;
+    line-height: 1.65;
+    color: var(--text);
+    min-height: 40px;
+  }
+  textarea.mono { font-family: var(--mono); font-size: 12px; }
+
+  /* ── Choices grid ── */
+  #choices-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  /* ── Answer + figure row ── */
+  #answer-row {
+    display: grid;
+    grid-template-columns: 110px 1fr;
+    gap: 10px;
+  }
+
+  #answer-sel-wrap select {
+    font-size: 22px;
+    font-weight: 700;
+    padding: 4px 6px;
+    border: none;
+    background: transparent;
+    width: 100%;
+    color: var(--blue);
+    cursor: pointer;
+    outline: none;
+  }
+
+  #fig-link {
+    font-size: 12px;
+    color: var(--blue);
+    text-decoration: none;
+    margin-top: 4px;
+    display: inline-block;
+  }
+  #fig-link:hover { text-decoration: underline; }
+
+  /* ── Action bar ── */
+  #action-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 16px;
+  }
+
+  .btn-status {
+    font-family: var(--font);
+    font-size: 14px;
+    font-weight: 600;
+    padding: 8px 18px;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: all 0.15s;
+    border: 1.5px solid;
+  }
+
+  .btn-ok {
+    border-color: var(--green);
+    color: var(--green);
+    background: transparent;
+  }
+  .btn-ok:hover, .btn-ok.active {
+    background: var(--green);
+    color: white;
+  }
+
+  .btn-fix {
+    border-color: var(--red);
+    color: var(--red);
+    background: transparent;
+  }
+  .btn-fix:hover, .btn-fix.active {
+    background: var(--red);
+    color: white;
+  }
+
+  #dirty-badge {
+    font-size: 12px;
+    color: var(--amber);
+    font-weight: 600;
+    display: none;
+  }
+
+  #btn-save {
+    font-family: var(--font);
+    font-size: 14px;
+    font-weight: 600;
+    padding: 8px 22px;
+    border-radius: 7px;
+    border: none;
+    cursor: pointer;
+    background: var(--blue);
+    color: white;
+    transition: opacity 0.15s;
+    margin-left: auto;
+  }
+  #btn-save:disabled {
+    background: var(--border-strong);
+    color: var(--text-faint);
+    cursor: default;
+  }
+  #btn-save:hover:not(:disabled) { opacity: 0.85; }
+
+  /* ── States ── */
+  #state-area {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-muted);
+    font-size: 15px;
+  }
+  #state-area.error { color: var(--red); }
+
+  .spinner {
+    display: inline-block;
+    width: 24px; height: 24px;
+    border: 3px solid var(--border);
+    border-top-color: var(--blue);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin-bottom: 12px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  #save-toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: var(--green);
+    color: white;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 14px;
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+  }
+  #save-toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div id="header">
+  <h1>入力チェック</h1>
+  <select id="sel-year"></select>
+  <select id="sel-subj"></select>
+  <div id="dots-wrap"></div>
+  <div id="stats">
+    <span class="stat-ok" id="stat-ok">OK 0</span>
+    <span class="stat-fix" id="stat-fix">修正 0</span>
+    <span class="stat-un" id="stat-un">未 0</span>
+  </div>
+</div>
+
+<!-- Main -->
+<div id="main">
+  <div id="state-area">
+    <div class="spinner"></div>
+    <div>バックエンドに接続中…<br><small style="color:var(--text-faint)">初回は30〜60秒かかる場合があります</small></div>
+  </div>
+</div>
+
+<div id="save-toast">✓ Notionに保存しました</div>
+
+<script>
+const API = "https://architect-quiz.onrender.com";
+const YEAR_ORDER = ["R7","R6","R5","R4","R3","R2","R1","H30","H29","H28","H27","H26","H25"];
+const SUBJ_ORDER = ["学科Ⅰ","学科Ⅱ","学科Ⅲ","学科Ⅳ","学科Ⅴ"];
+const STATUS_KEY = "quiz_check_status_v2";
+
+let allQuestions = [];
+let filtered = [];
+let currentIndex = 0;
+let edits = {};
+let checkStatus = {};
+let year = "";
+let subject = "";
+
+// ── Storage ──
+function loadStatus() {
+  try { checkStatus = JSON.parse(localStorage.getItem(STATUS_KEY) || "{}"); } catch {}
+}
+function saveStatus() {
+  localStorage.setItem(STATUS_KEY, JSON.stringify(checkStatus));
+}
+
+// ── Keys ──
+function qKey(q) { return `${q["年度"]}_${q["問題番号"]}`; }
+function currentQ() { return filtered[currentIndex]; }
+function currentEdits() { const k = qKey(currentQ()); return edits[k] || {}; }
+function isDirty() { return Object.keys(currentEdits()).length > 0; }
+function getValue(field) {
+  const e = currentEdits(); const q = currentQ();
+  return e[field] !== undefined ? e[field] : (q && q[field] != null ? q[field] : "");
+}
+function isModified(field) {
+  const e = currentEdits(); const q = currentQ(); if (!q) return false;
+  return e[field] !== undefined && e[field] !== (q[field] ?? "");
+}
+
+// ── Fetch ──
+async function fetchAll() {
+  showState("loading");
+  try {
+    const res = await fetch(`${API}/api/questions`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    allQuestions = await res.json();
+    populateSelectors();
+    applyFilter();
+  } catch(e) {
+    showState("error", "接続エラー: " + e.message + "\nバックエンドのURLとCORS設定を確認してください。");
+  }
+}
+
+function populateSelectors() {
+  // 実データから年度・科目の一覧を取得
+  const years = [...new Set(allQuestions.map(q => q["年度"]).filter(Boolean))];
+  const subjects = [...new Set(allQuestions.map(q => q["科目"]).filter(Boolean))];
+
+  // YEAR_ORDER / SUBJ_ORDER の順に並べ、残りは末尾に追加
+  years.sort((a, b) => {
+    const ai = YEAR_ORDER.indexOf(a), bi = YEAR_ORDER.indexOf(b);
+    if (ai === -1 && bi === -1) return a < b ? 1 : -1;
+    if (ai === -1) return 1; if (bi === -1) return -1;
+    return ai - bi;
+  });
+  subjects.sort((a, b) => {
+    const ai = SUBJ_ORDER.indexOf(a), bi = SUBJ_ORDER.indexOf(b);
+    if (ai === -1 && bi === -1) return a < b ? -1 : 1;
+    if (ai === -1) return 1; if (bi === -1) return -1;
+    return ai - bi;
+  });
+
+  const sy = document.getElementById("sel-year");
+  const ss = document.getElementById("sel-subj");
+  sy.innerHTML = years.map(y => `<option>${y}</option>`).join("");
+  ss.innerHTML = subjects.map(s => `<option>${s}</option>`).join("");
+
+  year = years[0] || "";
+  subject = subjects[0] || "";
+  sy.value = year;
+  ss.value = subject;
+}
+
+function applyFilter() {
+  filtered = allQuestions
+    .filter(q => q["年度"] === year && q["科目"] === subject)
+    .sort((a, b) => {
+      const na = parseInt((a["問題番号"] || "").replace("No.", "")) || 0;
+      const nb = parseInt((b["問題番号"] || "").replace("No.", "")) || 0;
+      return na - nb;
+    });
+  currentIndex = 0;
+  edits = {};
+  if (filtered.length === 0) {
+    showState("empty");
+  } else {
+    renderAll();
+  }
+}
+
+// ── Edit ──
+function handleEdit(field, value) {
+  const q = currentQ(); if (!q) return;
+  const k = qKey(q);
+  if (!edits[k]) edits[k] = {};
+  edits[k][field] = value;
+  updateDirtyState();
+  updateFieldModified(field);
+}
+
+function updateFieldModified(field) {
+  const card = document.querySelector(`[data-field-card="${field}"]`);
+  if (!card) return;
+  const mod = isModified(field);
+  card.classList.toggle("modified", mod);
+  const lbl = card.querySelector(".field-label");
+  if (lbl) lbl.textContent = fieldLabel(field) + (mod ? " ✏" : "");
+}
+
+function fieldLabel(field) {
+  const map = { "問題文":"問題文", "選択肢1":"選択肢①", "選択肢2":"選択肢②",
+    "選択肢3":"選択肢③", "選択肢4":"選択肢④", "解説":"解説", "図表URL":"図表URL" };
+  return map[field] || field;
+}
+
+function updateDirtyState() {
+  const dirty = isDirty();
+  document.getElementById("dirty-badge").style.display = dirty ? "inline" : "none";
+  document.getElementById("btn-save").disabled = !dirty;
+}
+
+// ── Save ──
+async function handleSave() {
+  const q = currentQ(); if (!q || !isDirty()) return;
+  const pageId = q["id"];
+  if (!pageId) { alert("Notion page IDが取得できません。バックエンドの /api/questions レスポンスに id フィールドが含まれているか確認してください。"); return; }
+
+  document.getElementById("btn-save").textContent = "保存中…";
+  document.getElementById("btn-save").disabled = true;
+
+  try {
+    const res = await fetch(`${API}/api/question/${pageId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(currentEdits())
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const k = qKey(q);
+    filtered[currentIndex] = { ...q, ...edits[k] };
+    allQuestions = allQuestions.map(x => x["id"] === q["id"] ? { ...x, ...edits[k] } : x);
+    delete edits[k];
+    updateDirtyState();
+    showToast();
+  } catch(e) {
+    alert("保存エラー: " + e.message);
+  } finally {
+    document.getElementById("btn-save").textContent = "Notionに保存";
+    document.getElementById("btn-save").disabled = !isDirty();
+  }
+}
+
+// ── Status ──
+function setStatus(status) {
+  const q = currentQ(); if (!q) return;
+  const k = qKey(q);
+  checkStatus[k] = status;
+  saveStatus();
+  updateActionBar();
+  updateDots();
+  updateStats();
+  if (status === "ok" && currentIndex < filtered.length - 1) {
+    navigate(1);
+  }
+}
+
+// ── Navigate ──
+function navigate(dir) {
+  const n = currentIndex + dir;
+  if (n >= 0 && n < filtered.length) {
+    currentIndex = n;
+    renderQuestion();
+  }
+}
+
+// ── State display ──
+function showState(type, msg) {
+  const area = document.getElementById("state-area");
+  if (type === "loading") {
+    area.className = "";
+    area.innerHTML = `<div class="spinner"></div><div>バックエンドに接続中…<br><small style="color:var(--text-faint)">初回は30〜60秒かかる場合があります</small></div>`;
+    area.style.display = "block";
+    document.getElementById("main").innerHTML = "";
+    document.getElementById("main").appendChild(area);
+  } else if (type === "error") {
+    area.className = "error";
+    area.innerHTML = msg.replace(/\n/g, "<br>");
+    area.style.display = "block";
+  } else if (type === "empty") {
+    area.className = "";
+    area.innerHTML = "該当する問題が見つかりませんでした";
+    area.style.display = "block";
+  } else {
+    area.style.display = "none";
+  }
+}
+
+// ── Render all ──
+function renderAll() {
+  const main = document.getElementById("main");
+  main.innerHTML = `
+    <div id="nav-bar">
+      <button class="btn-nav" id="btn-prev">&#8592;</button>
+      <div id="nav-title"></div>
+      <button class="btn-nav" id="btn-next">&#8594;</button>
+    </div>
+
+    <div class="field-card" data-field-card="問題文">
+      <div class="field-label">問題文</div>
+      <textarea id="f-mondai" rows="4" data-field="問題文"></textarea>
+    </div>
+
+    <div id="choices-grid">
+      <div class="field-card" data-field-card="選択肢1">
+        <div class="field-label">選択肢①</div>
+        <textarea id="f-c1" rows="2" data-field="選択肢1"></textarea>
+      </div>
+      <div class="field-card" data-field-card="選択肢2">
+        <div class="field-label">選択肢②</div>
+        <textarea id="f-c2" rows="2" data-field="選択肢2"></textarea>
+      </div>
+      <div class="field-card" data-field-card="選択肢3">
+        <div class="field-label">選択肢③</div>
+        <textarea id="f-c3" rows="2" data-field="選択肢3"></textarea>
+      </div>
+      <div class="field-card" data-field-card="選択肢4">
+        <div class="field-label">選択肢④</div>
+        <textarea id="f-c4" rows="2" data-field="選択肢4"></textarea>
+      </div>
+    </div>
+
+    <div id="answer-row">
+      <div class="field-card" id="answer-sel-wrap" data-field-card="正答">
+        <div class="field-label">正答</div>
+        <select id="f-answer">
+          <option>1</option><option>2</option><option>3</option><option>4</option>
+        </select>
+      </div>
+      <div class="field-card" data-field-card="図表URL">
+        <div class="field-label">図表URL</div>
+        <textarea id="f-fig" rows="1" class="mono" data-field="図表URL"></textarea>
+        <a id="fig-link" href="#" target="_blank" style="display:none">&#128279; 図表を開く</a>
+      </div>
+    </div>
+
+    <div class="field-card" data-field-card="解説">
+      <div class="field-label">解説</div>
+      <textarea id="f-kaisetsu" rows="7" data-field="解説"></textarea>
+    </div>
+
+    <div id="action-bar">
+      <button class="btn-status btn-ok" id="btn-ok">✓ OK</button>
+      <button class="btn-status btn-fix" id="btn-fix">△ 要修正</button>
+      <span id="dirty-badge">✏ 編集あり</span>
+      <button id="btn-save" disabled>Notionに保存</button>
+    </div>
+  `;
+
+  // Events
+  document.getElementById("btn-prev").addEventListener("click", () => navigate(-1));
+  document.getElementById("btn-next").addEventListener("click", () => navigate(1));
+  document.getElementById("btn-ok").addEventListener("click", () => setStatus("ok"));
+  document.getElementById("btn-fix").addEventListener("click", () => setStatus("needs_fix"));
+  document.getElementById("btn-save").addEventListener("click", handleSave);
+  document.getElementById("f-answer").addEventListener("change", e => handleEdit("正答", e.target.value));
+
+  document.querySelectorAll("textarea[data-field]").forEach(el => {
+    el.addEventListener("input", () => handleEdit(el.dataset.field, el.value));
+  });
+
+  // Keyboard
+  document.addEventListener("keydown", e => {
+    if (e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT") return;
+    if (e.key === "ArrowLeft") navigate(-1);
+    if (e.key === "ArrowRight") navigate(1);
+    if (e.key === "Enter") setStatus("ok");
+  });
+
+  renderQuestion();
+}
+
+function renderQuestion() {
+  const q = currentQ(); if (!q) return;
+  const k = qKey(q);
+  const status = checkStatus[k];
+
+  // Nav
+  document.getElementById("nav-title").innerHTML =
+    `${q["年度"]} ${q["科目"]} — ${q["問題番号"]}<span id="nav-pos"> ${currentIndex + 1} / ${filtered.length}</span>`;
+  document.getElementById("btn-prev").disabled = currentIndex === 0;
+  document.getElementById("btn-next").disabled = currentIndex === filtered.length - 1;
+
+  // Fill fields
+  const fields = { "f-mondai": "問題文", "f-c1": "選択肢1", "f-c2": "選択肢2",
+    "f-c3": "選択肢3", "f-c4": "選択肢4", "f-kaisetsu": "解説", "f-fig": "図表URL" };
+  for (const [id, field] of Object.entries(fields)) {
+    const el = document.getElementById(id);
+    el.value = getValue(field);
+    const card = el.closest(".field-card");
+    const mod = isModified(field);
+    card.classList.toggle("modified", mod);
+    card.querySelector(".field-label").textContent = fieldLabel(field) + (mod ? " ✏" : "");
+  }
+
+  // Answer
+  const ansEl = document.getElementById("f-answer");
+  ansEl.value = getValue("正答") || "1";
+  const ansCard = document.getElementById("answer-sel-wrap");
+  ansCard.classList.toggle("modified", isModified("正答"));
+
+  // Figure link
+  const figUrl = getValue("図表URL");
+  const figLink = document.getElementById("fig-link");
+  if (figUrl && figUrl.startsWith("http")) {
+    figLink.href = figUrl;
+    figLink.style.display = "inline-block";
+  } else {
+    figLink.style.display = "none";
+  }
+
+  updateActionBar();
+  updateDirtyState();
+  updateDots();
+  updateStats();
+
+  // Auto-resize textareas
+  document.querySelectorAll("textarea").forEach(el => autoResize(el));
+}
+
+function updateActionBar() {
+  const q = currentQ(); if (!q) return;
+  const status = checkStatus[qKey(q)];
+  document.getElementById("btn-ok").classList.toggle("active", status === "ok");
+  document.getElementById("btn-fix").classList.toggle("active", status === "needs_fix");
+}
+
+function updateDots() {
+  const wrap = document.getElementById("dots-wrap");
+  wrap.innerHTML = filtered.map((q, i) => {
+    const s = checkStatus[qKey(q)] || "";
+    return `<div class="dot ${s} ${i === currentIndex ? "active" : ""}" data-i="${i}" title="${q["問題番号"]}"></div>`;
+  }).join("");
+  wrap.querySelectorAll(".dot").forEach(d => {
+    d.addEventListener("click", () => { currentIndex = parseInt(d.dataset.i); renderQuestion(); });
+  });
+}
+
+function updateStats() {
+  const ok = filtered.filter(q => checkStatus[qKey(q)] === "ok").length;
+  const fix = filtered.filter(q => checkStatus[qKey(q)] === "needs_fix").length;
+  const un = filtered.length - ok - fix;
+  document.getElementById("stat-ok").textContent = `OK ${ok}`;
+  document.getElementById("stat-fix").textContent = `修正 ${fix}`;
+  document.getElementById("stat-un").textContent = `未 ${un}`;
+}
+
+function autoResize(el) {
+  el.style.height = "auto";
+  el.style.height = el.scrollHeight + "px";
+}
+
+function showToast() {
+  const t = document.getElementById("save-toast");
+  t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), 2500);
+}
+
+// ── Selectors init (event listeners only; options populated after fetch) ──
+function initSelectors() {
+  document.getElementById("sel-year").addEventListener("change", e => { year = e.target.value; applyFilter(); });
+  document.getElementById("sel-subj").addEventListener("change", e => { subject = e.target.value; applyFilter(); });
+}
+
+// ── Boot ──
+loadStatus();
+initSelectors();
+fetchAll();
+</script>
+</body>
+</html>
