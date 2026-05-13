@@ -375,25 +375,83 @@ export default function MockExam({ questions, onBack }) {
   // ── TRANSITION ─────────────────────────────────────────────────────────────
   if (phase === "transition") {
     const sec = sectionDefs[currentSectionIdx];
-    const nextSec = sectionDefs[currentSectionIdx+1];
-    let secCorrect=0;
-    for (let i=sec.startIdx;i<=sec.endIdx;i++) { if (answers[i]?.correct) secCorrect++; }
+    const nextSec = sectionDefs[currentSectionIdx + 1];
+
+    const secItems = examQuestions
+      .map((q, i) => ({ q, i, ans: answers[i] }))
+      .filter(({ q }) => sec.subjects.includes(q.科目));
+
+    const secCorrect = secItems.filter(({ ans }) => ans?.correct).length;
     const secTotal = sec.questionCount;
-    const secRate = secTotal>0 ? Math.round(secCorrect/secTotal*100) : 0;
+    const secRate = secTotal > 0 ? Math.round(secCorrect / secTotal * 100) : 0;
+
+    const cutoffs = CUTOFF_SCORES[examYear] ?? null;
+    const subjectResults = sec.subjects.map(subj => {
+      const subjItems = secItems.filter(({ q }) => q.科目 === subj);
+      const total = subjItems.length;
+      const correct = subjItems.filter(({ ans }) => ans?.correct).length;
+      const cutoff = cutoffs?.[subj] ?? null;
+      const passed = cutoff !== null ? correct >= cutoff : null;
+      const color = SUBJECT_COLORS[subj] ?? { bg: "#f3f4f6", color: "#374151" };
+      return { subj, total, correct, cutoff, passed, color };
+    });
+    const allPassed = subjectResults.filter(r => r.cutoff !== null).every(r => r.passed);
 
     return (
-      <div style={{maxWidth:680,margin:"0 auto",padding:"32px 16px",fontFamily:"sans-serif",textAlign:"center"}}>
-        <div style={{fontSize:40,marginBottom:12}}>☕</div>
-        <h2 style={{fontSize:18,fontWeight:"bold",marginBottom:4}}>{sec.label}　終了</h2>
-        <p style={{fontSize:14,color:"#6b7280",marginBottom:24}}>次のセクションを始める前に一息つきましょう</p>
-        <div style={{display:"inline-block",padding:"20px 36px",borderRadius:12,background:"#f9fafb",border:"1.5px solid #e5e7eb",marginBottom:28}}>
-          <div style={{fontSize:13,color:"#6b7280",marginBottom:4}}>このセクションの正答率</div>
-          <div style={{fontSize:36,fontWeight:"bold"}}>{secCorrect} <span style={{fontSize:18,color:"#6b7280"}}>/ {secTotal} 点</span></div>
-          <div style={{fontSize:14,color:"#6b7280"}}>{secRate}%</div>
+      <div style={{maxWidth:680,margin:"0 auto",padding:"24px 16px",fontFamily:"sans-serif"}}>
+        <h1 style={{fontSize:20,fontWeight:"bold",marginBottom:20}}>
+          <span style={{color:sec.color}}>■</span> {sec.label}　結果
+        </h1>
+
+        <div style={{padding:24,borderRadius:12,marginBottom:20,background:allPassed?"#f0fdf4":"#fef2f2",border:`1.5px solid ${allPassed?"#bbf7d0":"#fecaca"}`,textAlign:"center"}}>
+          <div style={{fontSize:38,fontWeight:"bold",marginBottom:4}}>
+            {secCorrect} <span style={{fontSize:18,color:"#6b7280"}}>/ {secTotal} 点</span>
+          </div>
+          <div style={{fontSize:14,color:"#6b7280",marginBottom:10}}>正答率 {secRate}%</div>
+          <div style={{display:"inline-block",padding:"6px 20px",borderRadius:99,background:allPassed?"#dcfce7":"#fee2e2",fontSize:14,fontWeight:"bold",color:allPassed?"#15803d":"#dc2626"}}>
+            {allPassed ? "✅ 足切りクリア" : "❌ 足切り未達"}
+          </div>
         </div>
-        <div style={{padding:"16px 20px",borderRadius:10,background:"#fffbeb",border:"1.5px solid #fde68a",marginBottom:28,textAlign:"left"}}>
-          <p style={{fontSize:12,color:"#92400e",fontWeight:"bold",margin:"0 0 6px"}}>次のセクション</p>
-          <p style={{fontSize:16,fontWeight:"bold",margin:"0 0 4px",color:"#111827"}}>{nextSec.label}</p>
+
+        <h2 style={{fontSize:14,fontWeight:"bold",marginBottom:10}}>科目別結果</h2>
+        <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:20}}>
+          {subjectResults.map(r => (
+            <div key={r.subj} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderRadius:10,background:r.passed===false?"#fef2f2":r.passed===true?"#f0fdf4":"#f9fafb",border:`1.5px solid ${r.passed===false?"#fecaca":r.passed===true?"#bbf7d0":"#e5e7eb"}`}}>
+              <span style={{fontSize:11,padding:"2px 8px",borderRadius:99,background:r.color.bg,color:r.color.color,fontWeight:"bold",whiteSpace:"nowrap",flexShrink:0}}>{r.subj}</span>
+              <div style={{flex:1}}>
+                <div style={{height:8,background:"#e5e7eb",borderRadius:4,overflow:"hidden"}}>
+                  <div style={{height:"100%",width:`${r.total>0?Math.round((r.correct/r.total)*100):0}%`,background:r.passed===false?"#ef4444":r.passed===true?"#22c55e":"#6366f1",borderRadius:4}} />
+                </div>
+              </div>
+              <span style={{fontSize:15,fontWeight:"bold",minWidth:60,textAlign:"right"}}>{r.correct} / {r.total}</span>
+              {r.cutoff !== null
+                ? <span style={{fontSize:12,fontWeight:"bold",whiteSpace:"nowrap",color:r.passed?"#15803d":"#dc2626"}}>{r.passed?"✅":"❌"} 基準{r.cutoff}点</span>
+                : <span style={{fontSize:12,color:"#9ca3af",whiteSpace:"nowrap"}}>判定なし</span>}
+            </div>
+          ))}
+        </div>
+
+        <h2 style={{fontSize:14,fontWeight:"bold",marginBottom:10}}>問題別結果</h2>
+        <div style={{display:"flex",flexDirection:"column",gap:5,marginBottom:24}}>
+          {secItems.map(({ q, i, ans }) => {
+            const correct = ans?.correct;
+            const unanswered = ans === null;
+            const subColor = SUBJECT_COLORS[q.科目] || { bg: "#f3f4f6", color: "#374151" };
+            return (
+              <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 12px",borderRadius:8,background:unanswered?"#fffbeb":correct?"#f0fdf4":"#fef2f2",border:`1px solid ${unanswered?"#fde68a":correct?"#bbf7d0":"#fecaca"}`}}>
+                <span style={{fontSize:15,minWidth:22}}>{unanswered?"—":correct?"✅":"❌"}</span>
+                <span style={{fontSize:12,color:"#6b7280",minWidth:64}}>{q.問題番号}</span>
+                <span style={{fontSize:11,padding:"1px 7px",borderRadius:99,background:subColor.bg,color:subColor.color,fontWeight:"bold",whiteSpace:"nowrap"}}>{q.科目?.replace("学科","")}</span>
+                <span style={{fontSize:13,flex:1,color:"#111827",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}}>{q.問題文?.slice(0,40)}…</span>
+                <span style={{fontSize:12,color:"#6b7280",whiteSpace:"nowrap"}}>正答: {q.正答}</span>
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{padding:"16px 20px",borderRadius:10,background:"#fffbeb",border:"1.5px solid #fde68a",marginBottom:16,textAlign:"left"}}>
+          <p style={{fontSize:12,color:"#92400e",fontWeight:"bold",margin:"0 0 4px"}}>次のセクション</p>
+          <p style={{fontSize:16,fontWeight:"bold",margin:"0 0 2px",color:"#111827"}}>{nextSec.label}</p>
           <p style={{fontSize:13,color:"#6b7280",margin:0}}>{nextSec.subjects.join("・")}　制限時間 {nextSec.minutes}分</p>
         </div>
         <button onClick={startNextSection} style={{width:"100%",padding:"16px",background:"#1d4ed8",color:"#fff",border:"none",borderRadius:10,fontSize:16,fontWeight:"bold",cursor:"pointer"}}>
