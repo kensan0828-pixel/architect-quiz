@@ -1,5 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 
+function renderWithBold(text) {
+  if (!text) return null;
+  return text.split(/\*\*(.+?)\*\*/g).map((part, i) =>
+    i % 2 === 1 ? <strong key={i}>{part}</strong> : part
+  );
+}
+
 // ── 定数 ────────────────────────────────────────────────────────────────────
 
 const CUTOFF_SCORES = {
@@ -79,7 +86,10 @@ export default function MockExam({ questions, onBack }) {
   const [timeLeft, setTimeLeft]         = useState(0);
   const [usedTime, setUsedTime]         = useState(0);
   const [timeUpSignal, setTimeUpSignal] = useState(0);
+  const [aiExplanation, setAiExplanation] = useState(null);
+  const [loadingAI, setLoadingAI]         = useState(false);
   const startRef = useRef(null);
+  const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
   const [history, setHistory] = useState(() => {
     try { return JSON.parse(localStorage.getItem("architect_quiz_history") || "{}"); }
@@ -154,6 +164,8 @@ export default function MockExam({ questions, onBack }) {
     setCurrentIndex(nextSec.startIdx);
     setSelected(null);
     setShowResult(false);
+    setAiExplanation(null);
+    setLoadingAI(false);
     setTimeLeft(nextSec.minutes * 60);
     setPhase("exam");
   }
@@ -177,9 +189,33 @@ export default function MockExam({ questions, onBack }) {
       localStorage.setItem("architect_quiz_history", JSON.stringify(updated));
       return updated;
     });
+    if (!correct) {
+      setAiExplanation(null);
+      setLoadingAI(true);
+      fetch(`${apiBase}/api/explain`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: q.問題文,
+          choices: [q.選択肢1, q.選択肢2, q.選択肢3, q.選択肢4],
+          correct_answer: q.正答,
+          user_answer: String(idx + 1),
+          subject: q.科目,
+          year: q.年度,
+          question_no: q.問題番号,
+          static_explanation: q.解説 || "",
+          is_correct: false,
+        }),
+      })
+        .then(r => r.json())
+        .then(data => { setAiExplanation(data.explanation); setLoadingAI(false); })
+        .catch(() => { setAiExplanation("解説の取得に失敗しました。"); setLoadingAI(false); });
+    }
   }
 
   function handleNext() {
+    setAiExplanation(null);
+    setLoadingAI(false);
     if (examMode === "honban" && sectionDefs.length > 0) {
       const sec = sectionDefs[currentSectionIdx];
       if (currentIndex >= sec.endIdx) {
@@ -354,7 +390,15 @@ export default function MockExam({ questions, onBack }) {
         {showResult && (
           <div style={{padding:"14px 16px",borderRadius:8,marginBottom:12,background:isCorrect?"#f0fdf4":"#fef2f2",border:`1px solid ${isCorrect?"#bbf7d0":"#fecaca"}`}}>
             <div style={{fontSize:16,fontWeight:"bold",color:isCorrect?"#15803d":"#dc2626"}}>{isCorrect?"✅ 正解！":`❌ 不正解（正解は ${q.正答}）`}</div>
-            {!isCorrect && q.解説 && <div style={{fontSize:14,color:"#374151",lineHeight:1.7,marginTop:8}}>{q.解説}</div>}
+            {!isCorrect && loadingAI && (
+              <div style={{fontSize:13,color:"#6b7280",marginTop:8}}>🤖 AI解説を生成中...</div>
+            )}
+            {!isCorrect && aiExplanation && (
+              <div style={{marginTop:10,padding:"12px 14px",borderRadius:8,background:"#fffbeb",border:"1px solid #fde68a"}}>
+                <div style={{fontSize:12,fontWeight:"bold",color:"#d97706",marginBottom:6}}>🤖 AI解説</div>
+                <div style={{fontSize:14,color:"#374151",lineHeight:1.8,whiteSpace:"pre-wrap"}}>{renderWithBold(aiExplanation)}</div>
+              </div>
+            )}
           </div>
         )}
 
