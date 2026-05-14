@@ -54,6 +54,9 @@ export default function App() {
   const [loadingAI, setLoadingAI]         = useState(false);
   const [articleLinks, setArticleLinks]   = useState(null);
   const [loadingArticles, setLoadingArticles] = useState(false);
+  /** 一問一答：問題文を読んでから選択肢を表示する */
+  const [readQuestionFirst, setReadQuestionFirst] = useState(false);
+  const [choicesVisible, setChoicesVisible] = useState(true);
 
   // localStorage: { "年度_問題番号": { attempts: N, correctCount: N } }
   const [history, setHistory] = useState(() => {
@@ -76,6 +79,15 @@ export default function App() {
         setLoading(false);
       });
   }, []);
+
+  useEffect(() => {
+    if (sessionComplete) return;
+    if (readQuestionFirst && !showResult) {
+      setChoicesVisible(false);
+    } else {
+      setChoicesVisible(true);
+    }
+  }, [currentIndex, showResult, sessionComplete, readQuestionFirst]);
 
   if (loading) return <div style={{ padding: 24 }}>問題を読み込み中...</div>;
   if (error)   return <div style={{ padding: 24, color: "red" }}>エラー: {error}</div>;
@@ -393,6 +405,24 @@ export default function App() {
         }}>
           📊 苦手順{weakMode ? "（解除）" : ""}
         </button>
+        <button
+          type="button"
+          onClick={() => {
+            setReadQuestionFirst((v) => {
+              const next = !v;
+              if (!next) setChoicesVisible(true);
+              return next;
+            });
+          }}
+          style={{
+            padding: "6px 14px", borderRadius: 8, border: "1.5px solid #7c3aed",
+            background: readQuestionFirst ? "#7c3aed" : "#fff",
+            color: readQuestionFirst ? "#fff" : "#7c3aed",
+            fontSize: 14, cursor: "pointer", fontWeight: "bold",
+          }}
+        >
+          📝 一問一答{readQuestionFirst ? "（ON）" : ""}
+        </button>
         <button onClick={() => setShowMockExam(true)} style={{
           padding: "6px 14px", borderRadius: 8, border: "1.5px solid #059669",
           background: "#fff", color: "#059669",
@@ -419,6 +449,11 @@ export default function App() {
       {weakMode && (
         <div style={{ fontSize: 12, color: "#dc2626", marginBottom: 8, padding: "6px 12px", background: "#fef2f2", borderRadius: 6 }}>
           ⚠️ 累計正答率の低い順に出題しています。未回答の問題は末尾に表示されます。
+        </div>
+      )}
+      {readQuestionFirst && (
+        <div style={{ fontSize: 12, color: "#5b21b6", marginBottom: 8, padding: "6px 12px", background: "#f5f3ff", borderRadius: 6, border: "1px solid #ddd6fe" }}>
+          一問一答：まず問題文・図表を読み、「選択肢を表示」から解答してください。最後にまとめて結果を確認できます。
         </div>
       )}
 
@@ -579,8 +614,22 @@ export default function App() {
         </div>
       )}
 
+      {readQuestionFirst && !choicesVisible && !showResult && (
+        <button
+          type="button"
+          onClick={() => setChoicesVisible(true)}
+          style={{
+            width: "100%", padding: "16px", marginBottom: 12,
+            background: "#7c3aed", color: "#fff", border: "none",
+            borderRadius: 8, fontSize: 16, fontWeight: "bold", cursor: "pointer",
+          }}
+        >
+          選択肢を表示する
+        </button>
+      )}
+
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {choices.map((choice, i) => {
+        {(choicesVisible || showResult) && choices.map((choice, i) => {
           const num = String(i + 1);
           const isSelected = selected === i;
           const isAnswer = num === q.正答;
