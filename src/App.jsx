@@ -19,6 +19,64 @@ function truncateExplanation(text, maxLen = 420) {
   return `${t.slice(0, maxLen)}…`;
 }
 
+const ZEN_CHOICE = { "１": "1", "２": "2", "３": "3", "４": "4" };
+
+/** Notion「正答」を 1〜4 の半角数字に正規化 */
+function normalizeChoiceAnswer(ans) {
+  if (ans == null || ans === "") return "";
+  const s = String(ans).trim();
+  if (ZEN_CHOICE[s]) return ZEN_CHOICE[s];
+  const m = s.match(/[1-4]/);
+  return m ? m[0] : s;
+}
+
+/**
+ * Notion「解説」全文から、choiceIndex（1〜4）に対応する段落を切り出す。
+ */
+function findKaisetsuSectionStart(t, choiceNum, fromIdx) {
+  if (choiceNum < 1 || choiceNum > 4) return -1;
+  const wn = ["１", "２", "３", "４"][choiceNum - 1];
+  const an = String(choiceNum);
+  const patterns = [
+    new RegExp(`(?:^|\\n)\\s*（\\s*${wn}\\s*）`, "gm"),
+    new RegExp(`(?:^|\\n)\\s*\\(\\s*${an}\\s*\\)`, "gm"),
+    new RegExp(`(?:^|\\n)\\s*${wn}\\s*[．.]`, "gm"),
+    new RegExp(`(?:^|\\n)\\s*${an}\\s*[\\.．]`, "gm"),
+    new RegExp(`(?:^|\\n)\\s*【\\s*${wn}\\s*】`, "gm"),
+    new RegExp(`(?:^|\\n)\\s*【\\s*${an}\\s*】`, "gm"),
+    new RegExp(`(?:^|\\n)\\s*(?:選択肢|解答|解説|設問)\\s*${wn}`, "gm"),
+    new RegExp(`(?:^|\\n)\\s*(?:選択肢|解答|解説|設問)\\s*${an}`, "gm"),
+  ];
+  let best = -1;
+  for (const re of patterns) {
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(t)) !== null) {
+      if (m.index >= fromIdx && (best < 0 || m.index < best)) best = m.index;
+    }
+  }
+  return best;
+}
+
+function extractKaisetsuForChoice(full, choiceIndex) {
+  if (!full || !String(full).trim()) return null;
+  const t = String(full);
+  const n = choiceIndex;
+  if (n < 1 || n > 4) return null;
+  const start = findKaisetsuSectionStart(t, n, 0);
+  if (start < 0) return null;
+  let end = t.length;
+  for (let next = n + 1; next <= 4; next++) {
+    const ns = findKaisetsuSectionStart(t, next, start + 1);
+    if (ns >= 0) {
+      end = ns;
+      break;
+    }
+  }
+  const slice = t.slice(start, end).trim();
+  return slice || null;
+}
+
 const HINT_CONFIG = {
   "学科Ⅰ（計画）":      { icon: "💡", label: "用語・基準を確認",   color: "#7c3aed", bg: "#f5f3ff", border: "#ddd6fe", heading: "💡 用語・基準（ヒント）" },
   "学科Ⅱ（環境・設備）": { icon: "💡", label: "公式・基準を確認",   color: "#9d174d", bg: "#fdf4ff", border: "#f5d0fe", heading: "💡 公式・基準（ヒント）" },
@@ -172,7 +230,6 @@ export default function App() {
   const [rqMarks, setRqMarks] = useState([null, null, null, null]);
   const [rqItemExpl, setRqItemExpl] = useState(null);
   const [rqJudgmentOk, setRqJudgmentOk] = useState(null);
-  const [rqLoadingItem, setRqLoadingItem] = useState(false);
   const [rqReview, setRqReview] = useState(false);
   const [rqExplList, setRqExplList] = useState(["", "", "", ""]);
 
@@ -205,7 +262,6 @@ export default function App() {
     setRqMarks([null, null, null, null]);
     setRqItemExpl(null);
     setRqJudgmentOk(null);
-    setRqLoadingItem(false);
     setRqReview(false);
     setRqExplList(["", "", "", ""]);
     setShowResult(false);
@@ -274,7 +330,6 @@ export default function App() {
     setRqMarks([null, null, null, null]);
     setRqItemExpl(null);
     setRqJudgmentOk(null);
-    setRqLoadingItem(false);
     setRqReview(false);
     setRqExplList(["", "", "", ""]);
   }
@@ -465,10 +520,12 @@ export default function App() {
   if (!q) return <div style={{ padding: 24 }}>問題を読み込み中...</div>;
 
   const choices = [q.選択肢1, q.選択肢2, q.選択肢3, q.選択肢4];
-  const expectedMaruAt = (i) => String(i + 1) === String(q.正答).trim();
+  const officialNum = normalizeChoiceAnswer(q.正答);
+  /** この設問で「正」が正しいマークか（正解肢＝妥当／他肢＝不適当で「誤」） */
+  const officialSeiExpected = (i) => String(i + 1) === officialNum;
   const isCorrect = readQuestionFirst && rqReview
-    ? [0, 1, 2, 3].every((i) => rqMarks[i] === expectedMaruAt(i))
-    : selected !== null && String(selected + 1) === q.正答;
+    ? [0, 1, 2, 3].every((i) => rqMarks[i] === officialSeiExpected(i))
+    : selected !== null && String(selected + 1) === officialNum;
   const subjectColor = SUBJECT_COLORS[q.科目] || { bg: "#f3f4f6", color: "#374151" };
   const histKey = `${q.年度}_${q.問題番号}`;
   const isLastQuestion = currentIndex + 1 >= displayList.length;
@@ -480,7 +537,7 @@ export default function App() {
     if (readQuestionFirst && !rqReview) return;
     setSelected(index);
     setShowResult(true);
-    const correct = String(index + 1) === q.正答;
+    const correct = String(index + 1) === officialNum;
 
     // セッション記録
     const newSessionAnswers = [...sessionAnswers];
@@ -503,7 +560,7 @@ export default function App() {
   }
 
   function finalizeRqReview() {
-    const overall = [0, 1, 2, 3].every((i) => rqMarks[i] === expectedMaruAt(i));
+    const overall = [0, 1, 2, 3].every((i) => rqMarks[i] === officialSeiExpected(i));
     const maruIdx = rqMarks.findIndex((m) => m === true);
     const maruCount = rqMarks.filter((m) => m === true).length;
     const selectedNum = maruCount === 1 ? maruIdx + 1 : 0;
@@ -530,61 +587,31 @@ export default function App() {
     setSelected(maruIdx >= 0 ? maruIdx : null);
   }
 
-  function handleRqMaru(userMaru) {
-    if (!readQuestionFirst || rqReview || rqLoadingItem || rqItemExpl !== null) return;
+  function handleRqMaru(userChoseSei) {
+    if (!readQuestionFirst || rqReview || rqItemExpl !== null) return;
     const idx = rqStep;
     if (rqMarks[idx] !== null) return;
 
-    const expectedMaru = expectedMaruAt(idx);
-    const judgmentOk = userMaru === expectedMaru;
+    const officialSei = officialSeiExpected(idx);
+    const judgmentOk = userChoseSei === officialSei;
     const nextMarks = [...rqMarks];
-    nextMarks[idx] = userMaru;
+    nextMarks[idx] = userChoseSei;
     setRqMarks(nextMarks);
     setRqJudgmentOk(judgmentOk);
-    setRqLoadingItem(true);
 
-    const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8000";
-    fetch(`${apiBase}/api/explain-item`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        question: q.問題文,
-        choices: [q.選択肢1, q.選択肢2, q.選択肢3, q.選択肢4],
-        correct_answer: String(q.正答).trim(),
-        choice_index: idx + 1,
-        user_maru: userMaru,
-        subject: q.科目,
-        year: q.年度,
-        question_no: q.問題番号,
-        static_explanation: q.解説 || "",
-      }),
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        const text = (data?.explanation && String(data.explanation).trim()) || "";
-        const expl = text || truncateExplanation(q.解説) || "端的な解説を取得できませんでした。";
-        setRqItemExpl(expl);
-        setRqExplList((prev) => {
-          const n = [...prev];
-          n[idx] = expl;
-          return n;
-        });
-        setRqLoadingItem(false);
-      })
-      .catch(() => {
-        const expl = truncateExplanation(q.解説) || "端的な解説を取得できませんでした。";
-        setRqItemExpl(expl);
-        setRqExplList((prev) => {
-          const n = [...prev];
-          n[idx] = expl;
-          return n;
-        });
-        setRqLoadingItem(false);
-      });
+    const extracted = extractKaisetsuForChoice(q.解説 || "", idx + 1);
+    const text = extracted
+      || "（Notionの解説から、この選択肢に対応する段落を自動では切り出せませんでした。解説の体裁が（１）（２）形式などの場合に認識しやすくなります。）";
+    setRqItemExpl(text);
+    setRqExplList((prev) => {
+      const n = [...prev];
+      n[idx] = text;
+      return n;
+    });
   }
 
   function handleRqAdvance() {
-    if (rqLoadingItem || !rqItemExpl) return;
+    if (!rqItemExpl) return;
     if (rqStep < 3) {
       setRqStep((s) => s + 1);
       setRqItemExpl(null);
@@ -641,7 +668,6 @@ export default function App() {
             setRqMarks([null, null, null, null]);
             setRqItemExpl(null);
             setRqJudgmentOk(null);
-            setRqLoadingItem(false);
             setRqReview(false);
             setRqExplList(["", "", "", ""]);
           }}
@@ -684,7 +710,7 @@ export default function App() {
       )}
       {readQuestionFirst && (
         <div style={{ fontSize: 12, color: "#5b21b6", marginBottom: 8, padding: "6px 12px", background: "#f5f3ff", borderRadius: 6, border: "1px solid #ddd6fe" }}>
-          一問一答：各設問（選択肢1〜4）に対して「〇＝正解として妥当」「×＝正解ではない」を選ぶと、その場で端的な解説が表示されます。4問終えたら結果を確認し、次の問題に進みます。
+          一問一答：各設問は選択肢の記述です。<strong>妥当な記述</strong>には「<strong>正</strong>」、<strong>不適当な記述</strong>には「<strong>誤</strong>」が正しいマークです（正解として選ぶべき肢＝「正」、それ以外＝「誤」）。解答後に Notion の解説のうち<strong>該当箇所のみ</strong>を表示します。
         </div>
       )}
 
@@ -742,14 +768,14 @@ export default function App() {
         {q.問題文}
       </div>
 
-      {/* 一問一答：図表 → 設問ごとに〇× → 即時の端的解説 */}
+      {/* 一問一答：図表 → 設問ごとに正/誤 → Notion解説の該当箇所 */}
       {readQuestionFirst ? (
         <>
           <QuestionFigure url={q.図表URL} />
           {!rqReview && (
             <div style={{ marginBottom: 20 }}>
               <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 10 }}>
-                設問 {rqStep + 1} / 4（この選択肢の正誤を〇×で答えてください）
+                設問 {rqStep + 1} / 4 — 記述が妥当なら「正」、不適当なら「誤」を選んでください
               </div>
               <div style={{
                 display: "flex", alignItems: "flex-start", gap: 12,
@@ -764,39 +790,51 @@ export default function App() {
               <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
                 <button
                   type="button"
-                  disabled={rqLoadingItem || rqItemExpl !== null}
+                  disabled={rqItemExpl !== null}
                   onClick={() => handleRqMaru(true)}
                   style={{
                     flex: 1, padding: "14px", borderRadius: 8, border: "1.5px solid #16a34a",
-                    background: rqItemExpl !== null || rqLoadingItem ? "#f3f4f6" : "#f0fdf4",
-                    color: "#15803d", fontSize: 16, fontWeight: "bold", cursor: rqItemExpl !== null || rqLoadingItem ? "not-allowed" : "pointer",
+                    background: rqItemExpl !== null ? "#f3f4f6" : "#f0fdf4",
+                    color: "#15803d", fontSize: 18, fontWeight: "bold", cursor: rqItemExpl !== null ? "not-allowed" : "pointer",
                   }}
                 >
-                  〇 正しい
+                  正
                 </button>
                 <button
                   type="button"
-                  disabled={rqLoadingItem || rqItemExpl !== null}
+                  disabled={rqItemExpl !== null}
                   onClick={() => handleRqMaru(false)}
                   style={{
                     flex: 1, padding: "14px", borderRadius: 8, border: "1.5px solid #dc2626",
-                    background: rqItemExpl !== null || rqLoadingItem ? "#f3f4f6" : "#fef2f2",
-                    color: "#991b1b", fontSize: 16, fontWeight: "bold", cursor: rqItemExpl !== null || rqLoadingItem ? "not-allowed" : "pointer",
+                    background: rqItemExpl !== null ? "#f3f4f6" : "#fef2f2",
+                    color: "#991b1b", fontSize: 18, fontWeight: "bold", cursor: rqItemExpl !== null ? "not-allowed" : "pointer",
                   }}
                 >
-                  × 誤り
+                  誤
                 </button>
               </div>
-              {rqLoadingItem && (
-                <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 10 }}>端的な解説を作成中…</div>
-              )}
-              {rqJudgmentOk !== null && rqItemExpl && !rqLoadingItem && (
+              {rqJudgmentOk !== null && rqItemExpl && (
                 <div style={{ marginBottom: 12 }}>
-                  <div style={{
-                    fontSize: 13, fontWeight: "bold", marginBottom: 6,
-                    color: rqJudgmentOk ? "#15803d" : "#dc2626",
-                  }}>
-                    {rqJudgmentOk ? "✅ 判断は妥当です" : "❌ 判断が公式の正誤と一致しません"}
+                  <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                    <span style={{ fontSize: 13, color: "#374151" }}>あなたの選択:</span>
+                    <span style={{
+                      fontSize: 14, fontWeight: "bold", padding: "4px 14px", borderRadius: 8,
+                      border: "1.5px solid #6366f1", background: "#eef2ff", color: "#4338ca",
+                    }}>
+                      {rqMarks[rqStep] ? "正" : "誤"}
+                    </span>
+                    <span style={{
+                      fontSize: 28, fontWeight: "bold", lineHeight: 1,
+                      color: rqJudgmentOk ? "#16a34a" : "#dc2626",
+                    }}>
+                      {rqJudgmentOk ? "〇" : "×"}
+                    </span>
+                    <span style={{ fontSize: 12, color: "#6b7280" }}>
+                      {rqJudgmentOk ? "（正しいマークを選びました）" : "（正しいマークと異なります）"}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 12, fontWeight: "bold", color: "#6b7280", marginBottom: 6 }}>
+                    Notion解説・該当箇所
                   </div>
                   <div style={{
                     padding: "12px 14px", borderRadius: 8, background: "#fafafa",
@@ -806,7 +844,7 @@ export default function App() {
                   </div>
                 </div>
               )}
-              {rqItemExpl && !rqLoadingItem && (
+              {rqItemExpl && (
                 <button
                   type="button"
                   onClick={handleRqAdvance}
@@ -839,13 +877,16 @@ export default function App() {
         {(!readQuestionFirst || rqReview) && choices.map((choice, i) => {
           const num = String(i + 1);
           const isSelected = selected === i;
-          const isAnswer = num === q.正答;
+          const isAnswer = num === officialNum;
+          const rowJudgmentOk = readQuestionFirst && rqReview && rqMarks[i] !== null
+            ? rqMarks[i] === officialSeiExpected(i)
+            : null;
           let bg = "#ffffff", border = "1.5px solid #e5e7eb", color = "#111827";
           if (readQuestionFirst && rqReview) {
             if (isAnswer) {
               bg = "#dcfce7"; border = "1.5px solid #16a34a"; color = "#15803d";
-            } else if (rqMarks[i] === true) {
-              bg = "#fee2e2"; border = "1.5px solid #dc2626"; color = "#991b1b";
+            } else if (rowJudgmentOk === false) {
+              bg = "#fef2f2"; border = "1.5px solid #fca5a5"; color = "#991b1b";
             }
           } else if (showResult) {
             if (isAnswer) { bg = "#dcfce7"; border = "1.5px solid #16a34a"; color = "#15803d"; }
@@ -863,8 +904,11 @@ export default function App() {
               <span style={{ fontWeight: "bold", minWidth: 20 }}>{num}.</span>
               <span style={{ flex: 1 }}>{choice}</span>
               {readQuestionFirst && rqReview && rqMarks[i] !== null && (
-                <span style={{ fontSize: 12, fontWeight: "bold", color: "#6b7280", whiteSpace: "nowrap" }}>
-                  あなた: {rqMarks[i] ? "〇" : "×"}
+                <span style={{ fontSize: 12, fontWeight: "bold", color: "#6b7280", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 6 }}>
+                  <span>あなた: {rqMarks[i] ? "正" : "誤"}</span>
+                  <span style={{ fontSize: 16, color: rowJudgmentOk ? "#16a34a" : "#dc2626" }}>
+                    {rowJudgmentOk ? "〇" : "×"}
+                  </span>
                 </span>
               )}
             </button>
@@ -885,7 +929,7 @@ export default function App() {
           </div>
           {readQuestionFirst && rqReview && (
             <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 10 }}>
-              正解として選ぶべき肢は <strong>{q.正答}</strong> 番のみです。各設問の端的な解説は上で確認済みです。
+              正解として選ぶべき肢は <strong>{officialNum}</strong> 番のみです。各設問の解説は Notion 登録内容の該当箇所を上で表示済みです。
             </div>
           )}
           {/* この問題の累計成績（今回分を含む） */}
