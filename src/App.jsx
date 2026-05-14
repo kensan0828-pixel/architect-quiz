@@ -166,10 +166,15 @@ export default function App() {
   const [loadingAI, setLoadingAI]         = useState(false);
   const [articleLinks, setArticleLinks]   = useState(null);
   const [loadingArticles, setLoadingArticles] = useState(false);
-  /** 一問一答：問題文・図表のあと、選択肢を1つずつ表示して解答 */
+  /** 一問一答：各選択肢を設問とみなし〇×で判断 */
   const [readQuestionFirst, setReadQuestionFirst] = useState(false);
-  /** 一問一答モードで表示中の選択肢インデックス（0〜3） */
-  const [singleChoiceStep, setSingleChoiceStep] = useState(0);
+  const [rqStep, setRqStep] = useState(0);
+  const [rqMarks, setRqMarks] = useState([null, null, null, null]);
+  const [rqItemExpl, setRqItemExpl] = useState(null);
+  const [rqJudgmentOk, setRqJudgmentOk] = useState(null);
+  const [rqLoadingItem, setRqLoadingItem] = useState(false);
+  const [rqReview, setRqReview] = useState(false);
+  const [rqExplList, setRqExplList] = useState(["", "", "", ""]);
 
   // localStorage: { "年度_問題番号": { attempts: N, correctCount: N } }
   const [history, setHistory] = useState(() => {
@@ -195,10 +200,19 @@ export default function App() {
 
   useEffect(() => {
     if (sessionComplete) return;
-    if (readQuestionFirst && !showResult) {
-      setSingleChoiceStep(0);
-    }
-  }, [currentIndex, showResult, sessionComplete, readQuestionFirst]);
+    if (!readQuestionFirst) return;
+    setRqStep(0);
+    setRqMarks([null, null, null, null]);
+    setRqItemExpl(null);
+    setRqJudgmentOk(null);
+    setRqLoadingItem(false);
+    setRqReview(false);
+    setRqExplList(["", "", "", ""]);
+    setShowResult(false);
+    setSelected(null);
+    setAiExplanation(null);
+    setLoadingAI(false);
+  }, [currentIndex, readQuestionFirst, sessionComplete]);
 
   if (loading) return <div style={{ padding: 24 }}>問題を読み込み中...</div>;
   if (error)   return <div style={{ padding: 24, color: "red" }}>エラー: {error}</div>;
@@ -256,7 +270,13 @@ export default function App() {
     setLoadingAI(false);
     setArticleLinks(null);
     setLoadingArticles(false);
-    setSingleChoiceStep(0);
+    setRqStep(0);
+    setRqMarks([null, null, null, null]);
+    setRqItemExpl(null);
+    setRqJudgmentOk(null);
+    setRqLoadingItem(false);
+    setRqReview(false);
+    setRqExplList(["", "", "", ""]);
   }
 
   function handleShuffle() {
@@ -445,8 +465,11 @@ export default function App() {
   if (!q) return <div style={{ padding: 24 }}>問題を読み込み中...</div>;
 
   const choices = [q.選択肢1, q.選択肢2, q.選択肢3, q.選択肢4];
+  const expectedMaruAt = (i) => String(i + 1) === String(q.正答).trim();
+  const isCorrect = readQuestionFirst && rqReview
+    ? [0, 1, 2, 3].every((i) => rqMarks[i] === expectedMaruAt(i))
+    : selected !== null && String(selected + 1) === q.正答;
   const subjectColor = SUBJECT_COLORS[q.科目] || { bg: "#f3f4f6", color: "#374151" };
-  const isCorrect = selected !== null && String(selected + 1) === q.正答;
   const histKey = `${q.年度}_${q.問題番号}`;
   const isLastQuestion = currentIndex + 1 >= displayList.length;
   const answeredInSession = sessionAnswers.filter(Boolean).length;
@@ -454,6 +477,7 @@ export default function App() {
 
   function handleSelect(index) {
     if (showResult) return;
+    if (readQuestionFirst && !rqReview) return;
     setSelected(index);
     setShowResult(true);
     const correct = String(index + 1) === q.正答;
@@ -476,37 +500,98 @@ export default function App() {
     };
     setHistory(updated);
     localStorage.setItem("architect_quiz_history", JSON.stringify(updated));
+  }
 
-    if (readQuestionFirst) {
-      setLoadingAI(true);
-      setAiExplanation(null);
-      const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8000";
-      fetch(`${apiBase}/api/explain`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          question: q.問題文,
-          choices: [q.選択肢1, q.選択肢2, q.選択肢3, q.選択肢4],
-          correct_answer: q.正答,
-          user_answer: String(index + 1),
-          subject: q.科目,
-          year: q.年度,
-          question_no: q.問題番号,
-          static_explanation: q.解説 || "",
-          is_correct: correct,
-        }),
-      })
-        .then((r) => r.json())
-        .then((data) => {
-          const text = (data?.explanation && String(data.explanation).trim()) || "";
-          setAiExplanation(text || truncateExplanation(q.解説) || "要約を取得できませんでした。");
-          setLoadingAI(false);
-        })
-        .catch(() => {
-          setAiExplanation(truncateExplanation(q.解説) || "解説の要約を取得できませんでした。");
-          setLoadingAI(false);
+  function finalizeRqReview() {
+    const overall = [0, 1, 2, 3].every((i) => rqMarks[i] === expectedMaruAt(i));
+    const maruIdx = rqMarks.findIndex((m) => m === true);
+    const maruCount = rqMarks.filter((m) => m === true).length;
+    const selectedNum = maruCount === 1 ? maruIdx + 1 : 0;
+
+    const newSessionAnswers = [...sessionAnswers];
+    newSessionAnswers[currentIndex] = { correct: overall, selected: selectedNum };
+    setSessionAnswers(newSessionAnswers);
+
+    const prev = (history[histKey] && "attempts" in history[histKey])
+      ? history[histKey]
+      : { attempts: 0, correctCount: 0 };
+    const updated = {
+      ...history,
+      [histKey]: {
+        attempts: prev.attempts + 1,
+        correctCount: prev.correctCount + (overall ? 1 : 0),
+      },
+    };
+    setHistory(updated);
+    localStorage.setItem("architect_quiz_history", JSON.stringify(updated));
+
+    setRqReview(true);
+    setShowResult(true);
+    setSelected(maruIdx >= 0 ? maruIdx : null);
+  }
+
+  function handleRqMaru(userMaru) {
+    if (!readQuestionFirst || rqReview || rqLoadingItem || rqItemExpl !== null) return;
+    const idx = rqStep;
+    if (rqMarks[idx] !== null) return;
+
+    const expectedMaru = expectedMaruAt(idx);
+    const judgmentOk = userMaru === expectedMaru;
+    const nextMarks = [...rqMarks];
+    nextMarks[idx] = userMaru;
+    setRqMarks(nextMarks);
+    setRqJudgmentOk(judgmentOk);
+    setRqLoadingItem(true);
+
+    const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8000";
+    fetch(`${apiBase}/api/explain-item`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        question: q.問題文,
+        choices: [q.選択肢1, q.選択肢2, q.選択肢3, q.選択肢4],
+        correct_answer: String(q.正答).trim(),
+        choice_index: idx + 1,
+        user_maru: userMaru,
+        subject: q.科目,
+        year: q.年度,
+        question_no: q.問題番号,
+        static_explanation: q.解説 || "",
+      }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        const text = (data?.explanation && String(data.explanation).trim()) || "";
+        const expl = text || truncateExplanation(q.解説) || "端的な解説を取得できませんでした。";
+        setRqItemExpl(expl);
+        setRqExplList((prev) => {
+          const n = [...prev];
+          n[idx] = expl;
+          return n;
         });
+        setRqLoadingItem(false);
+      })
+      .catch(() => {
+        const expl = truncateExplanation(q.解説) || "端的な解説を取得できませんでした。";
+        setRqItemExpl(expl);
+        setRqExplList((prev) => {
+          const n = [...prev];
+          n[idx] = expl;
+          return n;
+        });
+        setRqLoadingItem(false);
+      });
+  }
+
+  function handleRqAdvance() {
+    if (rqLoadingItem || !rqItemExpl) return;
+    if (rqStep < 3) {
+      setRqStep((s) => s + 1);
+      setRqItemExpl(null);
+      setRqJudgmentOk(null);
+      return;
     }
+    finalizeRqReview();
   }
 
   function handleNext() {
@@ -552,7 +637,13 @@ export default function App() {
           type="button"
           onClick={() => {
             setReadQuestionFirst((v) => !v);
-            setSingleChoiceStep(0);
+            setRqStep(0);
+            setRqMarks([null, null, null, null]);
+            setRqItemExpl(null);
+            setRqJudgmentOk(null);
+            setRqLoadingItem(false);
+            setRqReview(false);
+            setRqExplList(["", "", "", ""]);
           }}
           style={{
             padding: "6px 14px", borderRadius: 8, border: "1.5px solid #7c3aed",
@@ -593,7 +684,7 @@ export default function App() {
       )}
       {readQuestionFirst && (
         <div style={{ fontSize: 12, color: "#5b21b6", marginBottom: 8, padding: "6px 12px", background: "#f5f3ff", borderRadius: 6, border: "1px solid #ddd6fe" }}>
-          一問一答：問題文と図表を確認し、表示された選択肢から答えるか「次の選択肢へ」で進みます。解答後に解説の要約を表示し、次の問題では選択肢1から始まります。
+          一問一答：各設問（選択肢1〜4）に対して「〇＝正解として妥当」「×＝正解ではない」を選ぶと、その場で端的な解説が表示されます。4問終えたら結果を確認し、次の問題に進みます。
         </div>
       )}
 
@@ -651,40 +742,81 @@ export default function App() {
         {q.問題文}
       </div>
 
-      {/* ヒント・図表・選択肢（一問一答時は図表→ヒント→選択肢1件ずつ） */}
+      {/* 一問一答：図表 → 設問ごとに〇× → 即時の端的解説 */}
       {readQuestionFirst ? (
         <>
           <QuestionFigure url={q.図表URL} />
-          {!showResult && (
+          {!rqReview && (
             <div style={{ marginBottom: 20 }}>
               <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 10 }}>
-                選択肢 {singleChoiceStep + 1} / 4
+                設問 {rqStep + 1} / 4（この選択肢の正誤を〇×で答えてください）
               </div>
-              <button
-                type="button"
-                onClick={() => handleSelect(singleChoiceStep)}
-                style={{
-                  display: "flex", alignItems: "flex-start", gap: 12,
-                  width: "100%", background: "#ffffff", border: "1.5px solid #7c3aed",
-                  borderRadius: 8, padding: "14px 16px", cursor: "pointer",
-                  textAlign: "left", fontSize: 14, color: "#111827", lineHeight: 1.6,
-                  marginBottom: 12,
-                }}
-              >
-                <span style={{ fontWeight: "bold", minWidth: 20 }}>{singleChoiceStep + 1}.</span>
-                <span>{choices[singleChoiceStep]}</span>
-              </button>
-              {singleChoiceStep < 3 && (
+              <div style={{
+                display: "flex", alignItems: "flex-start", gap: 12,
+                width: "100%", background: "#ffffff", border: "1.5px solid #e5e7eb",
+                borderRadius: 8, padding: "14px 16px",
+                textAlign: "left", fontSize: 14, color: "#111827", lineHeight: 1.6,
+                marginBottom: 16,
+              }}>
+                <span style={{ fontWeight: "bold", minWidth: 20 }}>{rqStep + 1}.</span>
+                <span>{choices[rqStep]}</span>
+              </div>
+              <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
                 <button
                   type="button"
-                  onClick={() => setSingleChoiceStep((s) => s + 1)}
+                  disabled={rqLoadingItem || rqItemExpl !== null}
+                  onClick={() => handleRqMaru(true)}
                   style={{
-                    width: "100%", padding: "12px 16px", borderRadius: 8,
-                    border: "1.5px solid #e5e7eb", background: "#fff",
-                    color: "#374151", fontSize: 14, fontWeight: "bold", cursor: "pointer",
+                    flex: 1, padding: "14px", borderRadius: 8, border: "1.5px solid #16a34a",
+                    background: rqItemExpl !== null || rqLoadingItem ? "#f3f4f6" : "#f0fdf4",
+                    color: "#15803d", fontSize: 16, fontWeight: "bold", cursor: rqItemExpl !== null || rqLoadingItem ? "not-allowed" : "pointer",
                   }}
                 >
-                  次の選択肢へ
+                  〇 正しい
+                </button>
+                <button
+                  type="button"
+                  disabled={rqLoadingItem || rqItemExpl !== null}
+                  onClick={() => handleRqMaru(false)}
+                  style={{
+                    flex: 1, padding: "14px", borderRadius: 8, border: "1.5px solid #dc2626",
+                    background: rqItemExpl !== null || rqLoadingItem ? "#f3f4f6" : "#fef2f2",
+                    color: "#991b1b", fontSize: 16, fontWeight: "bold", cursor: rqItemExpl !== null || rqLoadingItem ? "not-allowed" : "pointer",
+                  }}
+                >
+                  × 誤り
+                </button>
+              </div>
+              {rqLoadingItem && (
+                <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 10 }}>端的な解説を作成中…</div>
+              )}
+              {rqJudgmentOk !== null && rqItemExpl && !rqLoadingItem && (
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{
+                    fontSize: 13, fontWeight: "bold", marginBottom: 6,
+                    color: rqJudgmentOk ? "#15803d" : "#dc2626",
+                  }}>
+                    {rqJudgmentOk ? "✅ 判断は妥当です" : "❌ 判断が公式の正誤と一致しません"}
+                  </div>
+                  <div style={{
+                    padding: "12px 14px", borderRadius: 8, background: "#fafafa",
+                    border: "1px solid #e5e7eb", fontSize: 14, color: "#374151", lineHeight: 1.75, whiteSpace: "pre-wrap",
+                  }}>
+                    {renderWithBold(rqItemExpl)}
+                  </div>
+                </div>
+              )}
+              {rqItemExpl && !rqLoadingItem && (
+                <button
+                  type="button"
+                  onClick={handleRqAdvance}
+                  style={{
+                    width: "100%", padding: "14px 16px", borderRadius: 8,
+                    background: "#7c3aed", color: "#fff", border: "none",
+                    fontSize: 15, fontWeight: "bold", cursor: "pointer",
+                  }}
+                >
+                  {rqStep < 3 ? "次の設問へ" : "この問題の結果を見る"}
                 </button>
               )}
             </div>
@@ -704,12 +836,18 @@ export default function App() {
       )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {(!readQuestionFirst || showResult) && choices.map((choice, i) => {
+        {(!readQuestionFirst || rqReview) && choices.map((choice, i) => {
           const num = String(i + 1);
           const isSelected = selected === i;
           const isAnswer = num === q.正答;
           let bg = "#ffffff", border = "1.5px solid #e5e7eb", color = "#111827";
-          if (showResult) {
+          if (readQuestionFirst && rqReview) {
+            if (isAnswer) {
+              bg = "#dcfce7"; border = "1.5px solid #16a34a"; color = "#15803d";
+            } else if (rqMarks[i] === true) {
+              bg = "#fee2e2"; border = "1.5px solid #dc2626"; color = "#991b1b";
+            }
+          } else if (showResult) {
             if (isAnswer) { bg = "#dcfce7"; border = "1.5px solid #16a34a"; color = "#15803d"; }
             else if (isSelected) { bg = "#fee2e2"; border = "1.5px solid #dc2626"; color = "#991b1b"; }
           } else if (isSelected) {
@@ -719,25 +857,37 @@ export default function App() {
             <button key={i} type="button" onClick={() => handleSelect(i)} style={{
               display: "flex", alignItems: "flex-start", gap: 12,
               background: bg, border, borderRadius: 8,
-              padding: "14px 16px", cursor: showResult ? "default" : "pointer",
+              padding: "14px 16px", cursor: showResult || rqReview ? "default" : "pointer",
               textAlign: "left", fontSize: 14, color, lineHeight: 1.6,
             }}>
               <span style={{ fontWeight: "bold", minWidth: 20 }}>{num}.</span>
-              <span>{choice}</span>
+              <span style={{ flex: 1 }}>{choice}</span>
+              {readQuestionFirst && rqReview && rqMarks[i] !== null && (
+                <span style={{ fontSize: 12, fontWeight: "bold", color: "#6b7280", whiteSpace: "nowrap" }}>
+                  あなた: {rqMarks[i] ? "〇" : "×"}
+                </span>
+              )}
             </button>
           );
         })}
       </div>
 
-      {showResult && (
+      {showResult && (!readQuestionFirst || rqReview) && (
         <div style={{
           marginTop: 24, padding: 16, borderRadius: 8,
           background: isCorrect ? "#f0fdf4" : "#fef2f2",
           border: `1px solid ${isCorrect ? "#bbf7d0" : "#fecaca"}`,
         }}>
           <div style={{ fontSize: 18, fontWeight: "bold", marginBottom: 6, color: isCorrect ? "#15803d" : "#dc2626" }}>
-            {isCorrect ? "✅ 正解！" : `❌ 不正解（正解は ${q.正答} ）`}
+            {readQuestionFirst && rqReview
+              ? (isCorrect ? "✅ 全設問の判断が正しかったです" : "❌ 設問の判断に誤りがありました")
+              : (isCorrect ? "✅ 正解！" : `❌ 不正解（正解は ${q.正答} ）`)}
           </div>
+          {readQuestionFirst && rqReview && (
+            <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 10 }}>
+              正解として選ぶべき肢は <strong>{q.正答}</strong> 番のみです。各設問の端的な解説は上で確認済みです。
+            </div>
+          )}
           {/* この問題の累計成績（今回分を含む） */}
           {(() => {
             const rec = (history[histKey] && "attempts" in history[histKey]) ? history[histKey] : null;
@@ -751,7 +901,6 @@ export default function App() {
           {!isCorrect && q.解説 && !readQuestionFirst && (
             <div style={{ fontSize: 14, color: "#374151", lineHeight: 1.7, marginBottom: 10 }}>{q.解説}</div>
           )}
-          {/* 通常モードのみ手動でAI解説 */}
           {!readQuestionFirst && !aiExplanation && !loadingAI && (
             <button type="button" onClick={() => {
               setLoadingAI(true);
@@ -782,12 +931,12 @@ export default function App() {
               🤖 AI解説を見る
             </button>
           )}
-          {loadingAI && (
+          {!readQuestionFirst && loadingAI && (
             <div style={{ marginTop: 8, fontSize: 13, color: "#6b7280" }}>
-              {readQuestionFirst ? "解説の要約を作成中…" : "🤖 AI解説を生成中…"}
+              🤖 AI解説を生成中…
             </div>
           )}
-          {aiExplanation && (
+          {!readQuestionFirst && aiExplanation && (
             <div style={{
               marginTop: 12, padding: "12px 14px", borderRadius: 8,
               background: isCorrect ? "#eff6ff" : "#fffbeb",
@@ -795,7 +944,7 @@ export default function App() {
               textAlign: "left",
             }}>
               <div style={{ fontSize: 12, fontWeight: "bold", color: isCorrect ? "#1d4ed8" : "#d97706", marginBottom: 6 }}>
-                {readQuestionFirst ? "📝 解説の要約" : "🤖 AI解説"}
+                🤖 AI解説
               </div>
               <div style={{ fontSize: 14, color: "#374151", lineHeight: 1.8, whiteSpace: "pre-wrap" }}>
                 {renderWithBold(aiExplanation)}
@@ -805,8 +954,8 @@ export default function App() {
         </div>
       )}
 
-      {showResult && (
-        <button onClick={handleNext} style={{
+      {showResult && (!readQuestionFirst || rqReview) && (
+        <button type="button" onClick={handleNext} style={{
           marginTop: 16, width: "100%", padding: "14px",
           background: isLastQuestion ? "#059669" : "#1d4ed8",
           color: "#fff", border: "none",

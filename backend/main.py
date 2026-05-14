@@ -247,6 +247,85 @@ AIの独自知識ではなく、この解説テキストの内容を正として
     return {"explanation": response.content[0].text}
 
 
+class ExplainItemRequest(BaseModel):
+    """一問一答：各選択肢（設問）ごとの端的解説"""
+
+    question: str
+    choices: list[str]
+    correct_answer: str
+    choice_index: int  # 1〜4
+    user_maru: bool  # True=〇（正解として妥当） / False=×（正解ではない）
+    subject: str
+    year: str
+    question_no: str
+    static_explanation: str = ""
+
+
+@app.post("/api/explain-item")
+def explain_item(req: ExplainItemRequest):
+    ci = max(1, min(4, int(req.choice_index)))
+    lines = [f"{i + 1}. {c}" for i, c in enumerate(req.choices) if c]
+    choices_text = "\n".join(lines)
+    target = req.choices[ci - 1] if ci - 1 < len(req.choices) else ""
+    ca = str(req.correct_answer).strip()
+    expected_maru = str(ci) == ca
+    user_label = "〇" if req.user_maru else "×"
+    official = (
+        "この選択肢は「正解として選ぶべき唯一の肢」です。"
+        if expected_maru
+        else "この選択肢は「正解として選ぶべき肢」ではありません。"
+    )
+
+    if req.static_explanation and req.static_explanation.strip():
+        prompt = f"""あなたは一級建築士試験の解説専門家です。次の公式解説テキストを唯一の根拠にしてください（独自補足で数値や条文を捏造しない）。
+
+【公式解説】
+{req.static_explanation}
+
+【科目】{req.subject}（{req.year} {req.question_no}）
+【問題文】
+{req.question}
+
+【選択肢一覧】
+{choices_text}
+
+【この設問の対象】{ci}番の文:
+{ci}. {target}
+
+【出題上の正解番号】{ca}番のみが正解です。{official}
+受験者はこの設問に対して **{user_label}** を選びました。
+
+【出力】
+- **{ci}番の選択肢**についてだけ、60〜100字で端的に解説してください。
+- 受験者の〇×が妥当かどうかに触れる一文を含めてもよいですが、冗長にしないでください。
+- 見出し・前置き・「公式解説によれば」等は禁止。本文のみ。"""
+
+    else:
+        prompt = f"""一級建築士試験の解説です。
+
+【科目】{req.subject}（{req.year} {req.question_no}）
+【問題文】
+{req.question}
+
+【選択肢一覧】
+{choices_text}
+
+【この設問の対象】{ci}番:
+{ci}. {target}
+
+【正解】{ca}番のみ。{official}
+受験者のマーク: **{user_label}**
+
+【出力】{ci}番について60〜100字で端的に解説（本文のみ、前置き禁止）。"""
+
+    response = anthropic_client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=400,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return {"explanation": response.content[0].text}
+
+
 # ── e-Gov 法令 ID マッピング ──
 LAW_EGOV = {
     "建築基準法":           "325AC0000000201",
