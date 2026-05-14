@@ -11,6 +11,118 @@ function renderWithBold(text) {
   );
 }
 
+/** 解説テキストの冒頭を要約代わりに使う（API失敗時など） */
+function truncateExplanation(text, maxLen = 420) {
+  if (!text || !String(text).trim()) return null;
+  const t = String(text).trim().replace(/\s+/g, " ");
+  if (t.length <= maxLen) return t;
+  return `${t.slice(0, maxLen)}…`;
+}
+
+const HINT_CONFIG = {
+  "学科Ⅰ（計画）":      { icon: "💡", label: "用語・基準を確認",   color: "#7c3aed", bg: "#f5f3ff", border: "#ddd6fe", heading: "💡 用語・基準（ヒント）" },
+  "学科Ⅱ（環境・設備）": { icon: "💡", label: "公式・基準を確認",   color: "#9d174d", bg: "#fdf4ff", border: "#f5d0fe", heading: "💡 公式・基準（ヒント）" },
+  "学科Ⅲ（法規）":      { icon: "📖", label: "関連条文を見る",     color: "#0891b2", bg: "#f0f9ff", border: "#bae6fd", heading: "📖 関連条文（ヒント）" },
+  "学科Ⅳ（構造）":      { icon: "💡", label: "公式・理論を確認",   color: "#92400e", bg: "#fffbeb", border: "#fde68a", heading: "💡 公式・理論（ヒント）" },
+  "学科Ⅴ（施工）":      { icon: "💡", label: "工法・基準を確認",   color: "#374151", bg: "#f9fafb", border: "#e5e7eb", heading: "💡 工法・基準（ヒント）" },
+};
+
+function QuestionFigure({ url }) {
+  if (!url) return null;
+  return (
+    <div style={{ marginBottom: 24, textAlign: "center" }}>
+      <img src={url} alt="図表"
+        style={{ maxWidth: "100%", borderRadius: 8, border: "1px solid #e5e7eb" }} />
+    </div>
+  );
+}
+
+function HintBlock({ q, articleLinks, setArticleLinks, loadingArticles, setLoadingArticles }) {
+  const cfg = HINT_CONFIG[q.科目];
+  if (!cfg) return null;
+  return (
+    <div style={{ marginBottom: 16 }}>
+      {!articleLinks && !loadingArticles && (
+        <button type="button" onClick={() => {
+          if (q.ヒント && q.ヒント.trim() !== "") {
+            try {
+              setArticleLinks(JSON.parse(q.ヒント));
+            } catch {
+              setArticleLinks([]);
+            }
+            return;
+          }
+          setLoadingArticles(true);
+          const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8000";
+          fetch(`${apiBase}/api/articles`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              question: q.問題文,
+              choices: [q.選択肢1, q.選択肢2, q.選択肢3, q.選択肢4],
+              subject: q.科目,
+              year: q.年度,
+              question_no: q.問題番号,
+              kaisetsu: q.解説 || "",
+            }),
+          })
+            .then(r => r.json())
+            .then(data => { setArticleLinks(data.items); setLoadingArticles(false); })
+            .catch(() => { setArticleLinks([]); setLoadingArticles(false); });
+        }} style={{
+          padding: "6px 14px", borderRadius: 8,
+          border: `1.5px solid ${cfg.color}`, background: "#fff",
+          color: cfg.color, fontSize: 13, fontWeight: "bold", cursor: "pointer",
+        }}>
+          {cfg.icon} {cfg.label}
+        </button>
+      )}
+      {loadingArticles && (
+        <div style={{ fontSize: 13, color: "#6b7280" }}>{cfg.icon} 検索中...</div>
+      )}
+      {articleLinks && articleLinks.length > 0 && (
+        <div style={{
+          padding: "12px 14px", borderRadius: 8,
+          background: cfg.bg, border: `1px solid ${cfg.border}`,
+          textAlign: "left",
+        }}>
+          <div style={{ fontSize: 12, fontWeight: "bold", color: cfg.color, marginBottom: 8 }}>
+            {cfg.heading}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {articleLinks.map((a, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 13, color: "#1e293b", fontWeight: "bold" }}>
+                  {a.label}
+                </span>
+                {a.detail && (
+                  <span style={{ fontSize: 12, color: "#6b7280" }}>（{a.detail}）</span>
+                )}
+                {a.url && (
+                  <a href={a.url} target="_blank" rel="noopener noreferrer" style={{
+                    fontSize: 11, color: "#0891b2", textDecoration: "underline",
+                  }}>
+                    e-Gov 🔗
+                  </a>
+                )}
+              </div>
+            ))}
+          </div>
+          <button type="button" onClick={() => setArticleLinks(null)} style={{
+            marginTop: 8, fontSize: 11, color: "#9ca3af", background: "none",
+            border: "none", cursor: "pointer", padding: 0,
+          }}>
+            閉じる
+          </button>
+        </div>
+      )}
+      {articleLinks && articleLinks.length === 0 && (
+        <div style={{ fontSize: 13, color: "#9ca3af" }}>ヒントが見つかりませんでした。</div>
+      )}
+    </div>
+  );
+}
+
 const SUBJECT_COLORS = {
   "学科Ⅰ（計画）":      { bg: "#ede9fe", color: "#7c3aed" },
   "学科Ⅱ（環境・設備）": { bg: "#fce7f3", color: "#9d174d" },
@@ -54,9 +166,10 @@ export default function App() {
   const [loadingAI, setLoadingAI]         = useState(false);
   const [articleLinks, setArticleLinks]   = useState(null);
   const [loadingArticles, setLoadingArticles] = useState(false);
-  /** 一問一答：問題文を読んでから選択肢を表示する */
+  /** 一問一答：問題文・図表のあと、選択肢を1つずつ表示して解答 */
   const [readQuestionFirst, setReadQuestionFirst] = useState(false);
-  const [choicesVisible, setChoicesVisible] = useState(true);
+  /** 一問一答モードで表示中の選択肢インデックス（0〜3） */
+  const [singleChoiceStep, setSingleChoiceStep] = useState(0);
 
   // localStorage: { "年度_問題番号": { attempts: N, correctCount: N } }
   const [history, setHistory] = useState(() => {
@@ -83,9 +196,7 @@ export default function App() {
   useEffect(() => {
     if (sessionComplete) return;
     if (readQuestionFirst && !showResult) {
-      setChoicesVisible(false);
-    } else {
-      setChoicesVisible(true);
+      setSingleChoiceStep(0);
     }
   }, [currentIndex, showResult, sessionComplete, readQuestionFirst]);
 
@@ -145,6 +256,7 @@ export default function App() {
     setLoadingAI(false);
     setArticleLinks(null);
     setLoadingArticles(false);
+    setSingleChoiceStep(0);
   }
 
   function handleShuffle() {
@@ -364,6 +476,37 @@ export default function App() {
     };
     setHistory(updated);
     localStorage.setItem("architect_quiz_history", JSON.stringify(updated));
+
+    if (readQuestionFirst) {
+      setLoadingAI(true);
+      setAiExplanation(null);
+      const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8000";
+      fetch(`${apiBase}/api/explain`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: q.問題文,
+          choices: [q.選択肢1, q.選択肢2, q.選択肢3, q.選択肢4],
+          correct_answer: q.正答,
+          user_answer: String(index + 1),
+          subject: q.科目,
+          year: q.年度,
+          question_no: q.問題番号,
+          static_explanation: q.解説 || "",
+          is_correct: correct,
+        }),
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          const text = (data?.explanation && String(data.explanation).trim()) || "";
+          setAiExplanation(text || truncateExplanation(q.解説) || "要約を取得できませんでした。");
+          setLoadingAI(false);
+        })
+        .catch(() => {
+          setAiExplanation(truncateExplanation(q.解説) || "解説の要約を取得できませんでした。");
+          setLoadingAI(false);
+        });
+    }
   }
 
   function handleNext() {
@@ -408,11 +551,8 @@ export default function App() {
         <button
           type="button"
           onClick={() => {
-            setReadQuestionFirst((v) => {
-              const next = !v;
-              if (!next) setChoicesVisible(true);
-              return next;
-            });
+            setReadQuestionFirst((v) => !v);
+            setSingleChoiceStep(0);
           }}
           style={{
             padding: "6px 14px", borderRadius: 8, border: "1.5px solid #7c3aed",
@@ -453,7 +593,7 @@ export default function App() {
       )}
       {readQuestionFirst && (
         <div style={{ fontSize: 12, color: "#5b21b6", marginBottom: 8, padding: "6px 12px", background: "#f5f3ff", borderRadius: 6, border: "1px solid #ddd6fe" }}>
-          一問一答：まず問題文・図表を読み、「選択肢を表示」から解答してください。最後にまとめて結果を確認できます。
+          一問一答：問題文と図表を確認し、表示された選択肢から答えるか「次の選択肢へ」で進みます。解答後に解説の要約を表示し、次の問題では選択肢1から始まります。
         </div>
       )}
 
@@ -511,125 +651,60 @@ export default function App() {
         {q.問題文}
       </div>
 
-      {/* ヒントボタン（全科目・回答前から表示） */}
-      {(() => {
-        const HINT_CONFIG = {
-          "学科Ⅰ（計画）":      { icon: "💡", label: "用語・基準を確認",   color: "#7c3aed", bg: "#f5f3ff", border: "#ddd6fe", heading: "💡 用語・基準（ヒント）" },
-          "学科Ⅱ（環境・設備）": { icon: "💡", label: "公式・基準を確認",   color: "#9d174d", bg: "#fdf4ff", border: "#f5d0fe", heading: "💡 公式・基準（ヒント）" },
-          "学科Ⅲ（法規）":      { icon: "📖", label: "関連条文を見る",     color: "#0891b2", bg: "#f0f9ff", border: "#bae6fd", heading: "📖 関連条文（ヒント）" },
-          "学科Ⅳ（構造）":      { icon: "💡", label: "公式・理論を確認",   color: "#92400e", bg: "#fffbeb", border: "#fde68a", heading: "💡 公式・理論（ヒント）" },
-          "学科Ⅴ（施工）":      { icon: "💡", label: "工法・基準を確認",   color: "#374151", bg: "#f9fafb", border: "#e5e7eb", heading: "💡 工法・基準（ヒント）" },
-        };
-        const cfg = HINT_CONFIG[q.科目];
-        if (!cfg) return null;
-        return (
-          <div style={{ marginBottom: 16 }}>
-            {!articleLinks && !loadingArticles && (
-              <button onClick={() => {
-                // Notionに手動登録ヒントがあればAPIを呼ばず即表示（ハイブリッド案3）
-                if (q.ヒント && q.ヒント.trim() !== "") {
-                  try {
-                    setArticleLinks(JSON.parse(q.ヒント));
-                  } catch {
-                    setArticleLinks([]);
-                  }
-                  return;
-                }
-                // 未登録の場合はAI生成にフォールバック
-                setLoadingArticles(true);
-                const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8000";
-                fetch(`${apiBase}/api/articles`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    question: q.問題文,
-                    choices: [q.選択肢1, q.選択肢2, q.選択肢3, q.選択肢4],
-                    subject: q.科目,
-                    year: q.年度,
-                    question_no: q.問題番号,
-                    kaisetsu: q.解説 || "",
-                  }),
-                })
-                  .then(r => r.json())
-                  .then(data => { setArticleLinks(data.items); setLoadingArticles(false); })
-                  .catch(() => { setArticleLinks([]); setLoadingArticles(false); });
-              }} style={{
-                padding: "6px 14px", borderRadius: 8,
-                border: `1.5px solid ${cfg.color}`, background: "#fff",
-                color: cfg.color, fontSize: 13, fontWeight: "bold", cursor: "pointer",
-              }}>
-                {cfg.icon} {cfg.label}
-              </button>
-            )}
-            {loadingArticles && (
-              <div style={{ fontSize: 13, color: "#6b7280" }}>{cfg.icon} 検索中...</div>
-            )}
-            {articleLinks && articleLinks.length > 0 && (
-              <div style={{
-                padding: "12px 14px", borderRadius: 8,
-                background: cfg.bg, border: `1px solid ${cfg.border}`,
-                textAlign: "left",
-              }}>
-                <div style={{ fontSize: 12, fontWeight: "bold", color: cfg.color, marginBottom: 8 }}>
-                  {cfg.heading}
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {articleLinks.map((a, i) => (
-                    <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-                      <span style={{ fontSize: 13, color: "#1e293b", fontWeight: "bold" }}>
-                        {a.label}
-                      </span>
-                      {a.detail && (
-                        <span style={{ fontSize: 12, color: "#6b7280" }}>（{a.detail}）</span>
-                      )}
-                      {a.url && (
-                        <a href={a.url} target="_blank" rel="noopener noreferrer" style={{
-                          fontSize: 11, color: "#0891b2", textDecoration: "underline",
-                        }}>
-                          e-Gov 🔗
-                        </a>
-                      )}
-                    </div>
-                  ))}
-                </div>
-                <button onClick={() => setArticleLinks(null)} style={{
-                  marginTop: 8, fontSize: 11, color: "#9ca3af", background: "none",
-                  border: "none", cursor: "pointer", padding: 0,
-                }}>
-                  閉じる
-                </button>
+      {/* ヒント・図表・選択肢（一問一答時は図表→ヒント→選択肢1件ずつ） */}
+      {readQuestionFirst ? (
+        <>
+          <QuestionFigure url={q.図表URL} />
+          {!showResult && (
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 10 }}>
+                選択肢 {singleChoiceStep + 1} / 4
               </div>
-            )}
-            {articleLinks && articleLinks.length === 0 && (
-              <div style={{ fontSize: 13, color: "#9ca3af" }}>ヒントが見つかりませんでした。</div>
-            )}
-          </div>
-        );
-      })()}
-
-      {q.図表URL && (
-        <div style={{ marginBottom: 24, textAlign: "center" }}>
-          <img src={q.図表URL} alt="図表"
-            style={{ maxWidth: "100%", borderRadius: 8, border: "1px solid #e5e7eb" }} />
-        </div>
-      )}
-
-      {readQuestionFirst && !choicesVisible && !showResult && (
-        <button
-          type="button"
-          onClick={() => setChoicesVisible(true)}
-          style={{
-            width: "100%", padding: "16px", marginBottom: 12,
-            background: "#7c3aed", color: "#fff", border: "none",
-            borderRadius: 8, fontSize: 16, fontWeight: "bold", cursor: "pointer",
-          }}
-        >
-          選択肢を表示する
-        </button>
+              <button
+                type="button"
+                onClick={() => handleSelect(singleChoiceStep)}
+                style={{
+                  display: "flex", alignItems: "flex-start", gap: 12,
+                  width: "100%", background: "#ffffff", border: "1.5px solid #7c3aed",
+                  borderRadius: 8, padding: "14px 16px", cursor: "pointer",
+                  textAlign: "left", fontSize: 14, color: "#111827", lineHeight: 1.6,
+                  marginBottom: 12,
+                }}
+              >
+                <span style={{ fontWeight: "bold", minWidth: 20 }}>{singleChoiceStep + 1}.</span>
+                <span>{choices[singleChoiceStep]}</span>
+              </button>
+              {singleChoiceStep < 3 && (
+                <button
+                  type="button"
+                  onClick={() => setSingleChoiceStep((s) => s + 1)}
+                  style={{
+                    width: "100%", padding: "12px 16px", borderRadius: 8,
+                    border: "1.5px solid #e5e7eb", background: "#fff",
+                    color: "#374151", fontSize: 14, fontWeight: "bold", cursor: "pointer",
+                  }}
+                >
+                  次の選択肢へ
+                </button>
+              )}
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          <HintBlock
+            q={q}
+            articleLinks={articleLinks}
+            setArticleLinks={setArticleLinks}
+            loadingArticles={loadingArticles}
+            setLoadingArticles={setLoadingArticles}
+          />
+          <QuestionFigure url={q.図表URL} />
+        </>
       )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {(choicesVisible || showResult) && choices.map((choice, i) => {
+        {(!readQuestionFirst || showResult) && choices.map((choice, i) => {
           const num = String(i + 1);
           const isSelected = selected === i;
           const isAnswer = num === q.正答;
@@ -641,7 +716,7 @@ export default function App() {
             bg = "#eff6ff"; border = "1.5px solid #3b82f6";
           }
           return (
-            <button key={i} onClick={() => handleSelect(i)} style={{
+            <button key={i} type="button" onClick={() => handleSelect(i)} style={{
               display: "flex", alignItems: "flex-start", gap: 12,
               background: bg, border, borderRadius: 8,
               padding: "14px 16px", cursor: showResult ? "default" : "pointer",
@@ -673,12 +748,12 @@ export default function App() {
               </div>
             );
           })()}
-          {!isCorrect && q.解説 && (
+          {!isCorrect && q.解説 && !readQuestionFirst && (
             <div style={{ fontSize: 14, color: "#374151", lineHeight: 1.7, marginBottom: 10 }}>{q.解説}</div>
           )}
-          {/* AI解説ボタン */}
-          {!aiExplanation && !loadingAI && (
-            <button onClick={() => {
+          {/* 通常モードのみ手動でAI解説 */}
+          {!readQuestionFirst && !aiExplanation && !loadingAI && (
+            <button type="button" onClick={() => {
               setLoadingAI(true);
               const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8000";
               fetch(`${apiBase}/api/explain`, {
@@ -708,7 +783,9 @@ export default function App() {
             </button>
           )}
           {loadingAI && (
-            <div style={{ marginTop: 8, fontSize: 13, color: "#6b7280" }}>🤖 AI解説を生成中...</div>
+            <div style={{ marginTop: 8, fontSize: 13, color: "#6b7280" }}>
+              {readQuestionFirst ? "解説の要約を作成中…" : "🤖 AI解説を生成中…"}
+            </div>
           )}
           {aiExplanation && (
             <div style={{
@@ -718,7 +795,7 @@ export default function App() {
               textAlign: "left",
             }}>
               <div style={{ fontSize: 12, fontWeight: "bold", color: isCorrect ? "#1d4ed8" : "#d97706", marginBottom: 6 }}>
-                🤖 AI解説
+                {readQuestionFirst ? "📝 解説の要約" : "🤖 AI解説"}
               </div>
               <div style={{ fontSize: 14, color: "#374151", lineHeight: 1.8, whiteSpace: "pre-wrap" }}>
                 {renderWithBold(aiExplanation)}
