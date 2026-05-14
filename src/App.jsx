@@ -21,13 +21,25 @@ function truncateExplanation(text, maxLen = 420) {
 
 const ZEN_CHOICE = { "１": "1", "２": "2", "３": "3", "４": "4" };
 
-/** Notion「正答」を 1〜4 の半角数字に正規化 */
+/** Notion「正答」を 1〜4 の半角数字に正規化（全角・数値型・文中の数字・selectオブジェクトに対応） */
 function normalizeChoiceAnswer(ans) {
   if (ans == null || ans === "") return "";
+  if (typeof ans === "object" && ans !== null && "name" in ans) {
+    return normalizeChoiceAnswer(ans.name);
+  }
+  if (typeof ans === "number" && ans >= 1 && ans <= 4) return String(Math.floor(ans));
   const s = String(ans).trim();
   if (ZEN_CHOICE[s]) return ZEN_CHOICE[s];
-  const m = s.match(/[1-4]/);
-  return m ? m[0] : s;
+  const all = s.match(/[1-4]/g);
+  if (all?.length) return all[all.length - 1];
+  return "";
+}
+
+/** 「誤り／不適当…を選べ」系で、正答の肢は記述として不適切＝マークは「誤」が正しい */
+function isNegativeAnswerChoiceQuestion(problemText) {
+  const t = problemText || "";
+  return /(?:誤って|誤り|誤っている|不正確|不適切|不適当|正しくない|妥当でない|当てはまらない|適当でない)(?:もの|のは|を|に)/i.test(t)
+    || /不適当なもの|不適切なもの|誤っているもの|正しくないもの|妥当でないもの/i.test(t);
 }
 
 /**
@@ -229,7 +241,6 @@ export default function App() {
   const [rqStep, setRqStep] = useState(0);
   const [rqMarks, setRqMarks] = useState([null, null, null, null]);
   const [rqItemExpl, setRqItemExpl] = useState(null);
-  const [rqJudgmentOk, setRqJudgmentOk] = useState(null);
   const [rqReview, setRqReview] = useState(false);
   const [rqExplList, setRqExplList] = useState(["", "", "", ""]);
 
@@ -261,7 +272,6 @@ export default function App() {
     setRqStep(0);
     setRqMarks([null, null, null, null]);
     setRqItemExpl(null);
-    setRqJudgmentOk(null);
     setRqReview(false);
     setRqExplList(["", "", "", ""]);
     setShowResult(false);
@@ -329,7 +339,6 @@ export default function App() {
     setRqStep(0);
     setRqMarks([null, null, null, null]);
     setRqItemExpl(null);
-    setRqJudgmentOk(null);
     setRqReview(false);
     setRqExplList(["", "", "", ""]);
   }
@@ -521,8 +530,17 @@ export default function App() {
 
   const choices = [q.選択肢1, q.選択肢2, q.選択肢3, q.選択肢4];
   const officialNum = normalizeChoiceAnswer(q.正答);
-  /** この設問で「正」が正しいマークか（正解肢＝妥当／他肢＝不適当で「誤」） */
-  const officialSeiExpected = (i) => String(i + 1) === officialNum;
+  const negativeAnswerPick = isNegativeAnswerChoiceQuestion(q.問題文);
+  /**
+   * この設問で「正」が正しいマークか。
+   * 正しい記述を選ぶ形式: 正答の肢だけ妥当→「正」が正解。
+   * 「誤り／不適当…を選べ」形式: 正答の肢は不適切→「誤」が正解（問題文から自動判定）。
+   */
+  const officialSeiExpected = (i) => {
+    const isDesignated = String(i + 1) === officialNum;
+    return negativeAnswerPick ? !isDesignated : isDesignated;
+  };
+  const rqFeedbackOk = !rqReview && rqItemExpl ? rqMarks[rqStep] === officialSeiExpected(rqStep) : null;
   const isCorrect = readQuestionFirst && rqReview
     ? [0, 1, 2, 3].every((i) => rqMarks[i] === officialSeiExpected(i))
     : selected !== null && String(selected + 1) === officialNum;
@@ -592,12 +610,9 @@ export default function App() {
     const idx = rqStep;
     if (rqMarks[idx] !== null) return;
 
-    const officialSei = officialSeiExpected(idx);
-    const judgmentOk = userChoseSei === officialSei;
     const nextMarks = [...rqMarks];
     nextMarks[idx] = userChoseSei;
     setRqMarks(nextMarks);
-    setRqJudgmentOk(judgmentOk);
 
     const extracted = extractKaisetsuForChoice(q.解説 || "", idx + 1);
     const text = extracted
@@ -615,7 +630,6 @@ export default function App() {
     if (rqStep < 3) {
       setRqStep((s) => s + 1);
       setRqItemExpl(null);
-      setRqJudgmentOk(null);
       return;
     }
     finalizeRqReview();
@@ -667,7 +681,6 @@ export default function App() {
             setRqStep(0);
             setRqMarks([null, null, null, null]);
             setRqItemExpl(null);
-            setRqJudgmentOk(null);
             setRqReview(false);
             setRqExplList(["", "", "", ""]);
           }}
@@ -710,7 +723,7 @@ export default function App() {
       )}
       {readQuestionFirst && (
         <div style={{ fontSize: 12, color: "#5b21b6", marginBottom: 8, padding: "6px 12px", background: "#f5f3ff", borderRadius: 6, border: "1px solid #ddd6fe" }}>
-          一問一答：各設問は選択肢の記述です。<strong>妥当な記述</strong>には「<strong>正</strong>」、<strong>不適当な記述</strong>には「<strong>誤</strong>」が正しいマークです（正解として選ぶべき肢＝「正」、それ以外＝「誤」）。解答後に Notion の解説のうち<strong>該当箇所のみ</strong>を表示します。
+          一問一答：各設問は選択肢の記述です。<strong>妥当な記述</strong>には「<strong>正</strong>」、<strong>不適当な記述</strong>には「<strong>誤</strong>」が正しいマークです（「正しいものを選べ」形式では正答の肢＝「正」、「誤り／不適当なものを選べ」形式では正答の肢＝「誤」として問題文から自動判定）。解答後に Notion の解説のうち<strong>該当箇所のみ</strong>を表示します。
         </div>
       )}
 
@@ -813,8 +826,8 @@ export default function App() {
                   誤
                 </button>
               </div>
-              {rqJudgmentOk !== null && rqItemExpl && (
-                <div style={{ marginBottom: 12 }}>
+              {rqItemExpl && (
+                <div style={{ marginBottom: 12, width: "100%", alignSelf: "stretch" }}>
                   <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, marginBottom: 10 }}>
                     <span style={{ fontSize: 13, color: "#374151" }}>あなたの選択:</span>
                     <span style={{
@@ -825,20 +838,21 @@ export default function App() {
                     </span>
                     <span style={{
                       fontSize: 28, fontWeight: "bold", lineHeight: 1,
-                      color: rqJudgmentOk ? "#16a34a" : "#dc2626",
+                      color: rqFeedbackOk ? "#16a34a" : "#dc2626",
                     }}>
-                      {rqJudgmentOk ? "〇" : "×"}
+                      {rqFeedbackOk ? "〇" : "×"}
                     </span>
                     <span style={{ fontSize: 12, color: "#6b7280" }}>
-                      {rqJudgmentOk ? "（正しいマークを選びました）" : "（正しいマークと異なります）"}
+                      {rqFeedbackOk ? "（正しいマークを選びました）" : "（正しいマークと異なります）"}
                     </span>
                   </div>
-                  <div style={{ fontSize: 12, fontWeight: "bold", color: "#6b7280", marginBottom: 6 }}>
+                  <div style={{ fontSize: 12, fontWeight: "bold", color: "#6b7280", marginBottom: 6, textAlign: "left" }}>
                     Notion解説・該当箇所
                   </div>
                   <div style={{
                     padding: "12px 14px", borderRadius: 8, background: "#fafafa",
                     border: "1px solid #e5e7eb", fontSize: 14, color: "#374151", lineHeight: 1.75, whiteSpace: "pre-wrap",
+                    textAlign: "left", width: "100%", boxSizing: "border-box",
                   }}>
                     {renderWithBold(rqItemExpl)}
                   </div>
