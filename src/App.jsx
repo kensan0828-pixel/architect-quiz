@@ -45,6 +45,61 @@ function isNegativeAnswerChoiceQuestion(problemText) {
 const LS_RQ_RESUME = "architect_quiz_rq_resume";
 const LS_RQ_INTERRUPT = "architect_quiz_rq_interrupt";
 const LS_RQ_STEP = "architect_quiz_rq_step_stats";
+const LS_RQ_RECALL = "architect_quiz_rq_recall";
+const LS_RQ_WRONG_STREAK = "architect_quiz_rq_wrong_streak";
+/** 一問一答×苦手順：この回数以上かつ正答率以上なら出題除外 */
+const RQ_MASTERED_MIN_ATTEMPTS = 7;
+const RQ_MASTERED_RATE = 0.85;
+const RQ_RECALL_WRONG_STREAK = 2;
+
+function rqStepRecallId(histKey, step) {
+  return `${histKey}|${step}`;
+}
+
+function getRqStepCell(rqStepStats, histKey, step) {
+  const row = rqStepStats[histKey];
+  const cell = Array.isArray(row) && row[step] ? row[step] : null;
+  return cell && cell.attempts > 0
+    ? { attempts: cell.attempts, correctCount: cell.correctCount }
+    : { attempts: 0, correctCount: 0 };
+}
+
+/** 設問単位：7回以上かつ正答率85%以上 */
+function isRqStepMastered(rqStepStats, histKey, step) {
+  const cell = getRqStepCell(rqStepStats, histKey, step);
+  if (cell.attempts < RQ_MASTERED_MIN_ATTEMPTS) return false;
+  return cell.correctCount / cell.attempts >= RQ_MASTERED_RATE;
+}
+
+function loadRqRecallSet() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(LS_RQ_RECALL) || "[]");
+    return new Set(Array.isArray(raw) ? raw.filter((s) => typeof s === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveRqRecallSet(set) {
+  try {
+    localStorage.setItem(LS_RQ_RECALL, JSON.stringify([...set]));
+  } catch { /* ignore */ }
+}
+
+function loadRqWrongStreaks() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(LS_RQ_WRONG_STREAK) || "{}");
+    return raw && typeof raw === "object" ? raw : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveRqWrongStreaks(obj) {
+  try {
+    localStorage.setItem(LS_RQ_WRONG_STREAK, JSON.stringify(obj));
+  } catch { /* ignore */ }
+}
 
 /** 一問一答：設問 i（0〜3）で「正」が正しいマークか */
 function getOfficialSeiExpectedForQuestion(q, i) {
@@ -119,23 +174,27 @@ function buildWeakOrderIndices(filtered, history, defaultSortFn) {
 
 /**
  * 一問一答の苦手順：各設問（記述1〜4）を単位に、rqStepStats の正答率が低い順。
+ * 7回以上かつ正答率85%以上の設問は除外（recallSet にある設問は再出題）。
  * 未回答（0回）の設問は末尾。同率・未回答群内は問題の defaultSortFn、同一問題内は（１）→（４）。
  */
-function buildRqStepWeakFlatOrder(baseQuestionList, rqStepStats, defaultSortFn) {
+function buildRqStepWeakFlatOrder(baseQuestionList, rqStepStats, defaultSortFn, recallSet) {
   const getStepRate = (histKey, step) => {
-    const row = rqStepStats[histKey];
-    const cell = Array.isArray(row) && row[step] ? row[step] : null;
-    if (!cell || cell.attempts === 0) return null;
+    const cell = getRqStepCell(rqStepStats, histKey, step);
+    if (cell.attempts === 0) return null;
     return cell.correctCount / cell.attempts;
   };
   const cells = [];
   for (const q of baseQuestionList) {
     const histKey = `${q.年度}_${q.問題番号}`;
     for (let step = 0; step < 4; step++) {
-      cells.push({ q, histKey, step });
+      const rid = rqStepRecallId(histKey, step);
+      const isRecall = recallSet.has(rid);
+      if (!isRecall && isRqStepMastered(rqStepStats, histKey, step)) continue;
+      cells.push({ q, histKey, step, isRecall });
     }
   }
   return cells.sort((a, b) => {
+    if (a.isRecall !== b.isRecall) return a.isRecall ? -1 : 1;
     const ra = getStepRate(a.histKey, a.step);
     const rb = getStepRate(b.histKey, b.step);
     if (ra === null && rb !== null) return 1;
@@ -349,6 +408,8 @@ export default function App() {
   const [rqReview, setRqReview] = useState(false);
   const [rqExplList, setRqExplList] = useState(["", "", "", ""]);
   const [rqStepStats, setRqStepStats] = useState(() => loadRqStepStatsObject());
+  /** 通常一問一答で2連続誤答した設問（苦手順へ呼び戻し） */
+  const [rqRecallSet, setRqRecallSet] = useState(() => loadRqRecallSet());
   const [rqInterruptExists, setRqInterruptExists] = useState(() => !!readRqInterruptPayload());
   const [rqPendingRestore, setRqPendingRestore] = useState(null);
   const rqHydratingRef = useRef(false);
@@ -443,17 +504,22 @@ export default function App() {
       const rebuilt = rqFlatOrderOverride.map(({ id, step }) => {
         const qq = idMap.get(id);
         if (!qq || step < 0 || step > 3) return null;
-        return { q: qq, histKey: `${qq.年度}_${qq.問題番号}`, step };
+        const histKey = `${qq.年度}_${qq.問題番号}`;
+        const rid = rqStepRecallId(histKey, step);
+        const isRecall = rqRecallSet.has(rid);
+        if (!isRecall && isRqStepMastered(rqStepStats, histKey, step)) return null;
+        return { q: qq, histKey, step, isRecall };
       }).filter(Boolean);
-      if (rebuilt.length === rqFlatOrderOverride.length) return rebuilt;
+      if (rebuilt.length > 0) return rebuilt;
     }
     return buildRqStepWeakFlatOrder(
       [...filtered].sort(defaultSort),
       rqStepStats,
       defaultSort,
+      rqRecallSet,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 同一フィルター内では出題順を固定（rqStepStats の更新で並び替えない）
-  }, [readQuestionFirst, weakMode, flatFreezeKey, rqFlatOrderOverride]);
+  }, [readQuestionFirst, weakMode, flatFreezeKey, rqFlatOrderOverride, rqRecallSet]);
 
   const orderKeyForListSig = readQuestionFirst && weakMode
     ? "rqflatweak"
@@ -753,6 +819,56 @@ export default function App() {
   }
 
   // ── 通常の問題画面 ──
+  const isRqFlatWeakEmpty = readQuestionFirst && weakMode && rqWeakFlatUnits.length === 0;
+  if (isRqFlatWeakEmpty) {
+    return (
+      <div style={{ maxWidth: 680, margin: "0 auto", padding: "24px 16px", fontFamily: "sans-serif" }}>
+        <h1 style={{ fontSize: 20, fontWeight: "bold", marginBottom: 16 }}>建築士試験 問題アプリ</h1>
+        <FilterBar subjects={subjects} years={years} filterSubject={filterSubject} filterYear={filterYear}
+          onSubjectChange={handleSubjectChange} onYearChange={handleYearChange} />
+        <div style={{
+          padding: 20, borderRadius: 8, background: "#f0fdf4", border: "1px solid #bbf7d0",
+          marginBottom: 16, lineHeight: 1.65, fontSize: 14, color: "#166534",
+        }}>
+          <p style={{ margin: "0 0 8px", fontWeight: "bold" }}>出題対象の設問がありません</p>
+          <p style={{ margin: 0, fontSize: 13, color: "#15803d" }}>
+            各記述で{RQ_MASTERED_MIN_ATTEMPTS}回以上回答し正答率{Math.round(RQ_MASTERED_RATE * 100)}%以上の設問は苦手順から除外しています。
+            通常の一問一答で同じ記述を{RQ_RECALL_WRONG_STREAK}回連続で誤った場合は、苦手順に呼び戻されます。
+          </p>
+          {rqRecallSet.size > 0 && (
+            <p style={{ margin: "10px 0 0", fontSize: 13, color: "#b45309" }}>
+              呼び戻し待ちの設問が {rqRecallSet.size} 件あります。下のボタンで苦手順を再構築してください。
+            </p>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            setRqFlatOrderOverride(null);
+            setRqFlatIndex(0);
+            if (rqRecallSet.size === 0) handleResetOrder();
+          }}
+          style={{
+            width: "100%", padding: "14px", marginBottom: 8,
+            background: "#7c3aed", color: "#fff", border: "none",
+            borderRadius: 8, fontSize: 15, fontWeight: "bold", cursor: "pointer",
+          }}
+        >
+          {rqRecallSet.size > 0 ? "苦手順を再構築" : "苦手順を解除"}
+        </button>
+        {rqRecallSet.size > 0 && (
+          <button type="button" onClick={handleResetOrder} style={{
+            width: "100%", padding: "12px",
+            background: "#fff", color: "#dc2626", border: "1.5px solid #dc2626",
+            borderRadius: 8, fontSize: 14, cursor: "pointer",
+          }}>
+            苦手順を解除
+          </button>
+        )}
+      </div>
+    );
+  }
+
   const isRqFlatWeak = readQuestionFirst && weakMode && rqWeakFlatUnits.length > 0;
   const qFlat = isRqFlatWeak ? rqWeakFlatUnits[Math.min(rqFlatIndex, rqWeakFlatUnits.length - 1)] : null;
   const q = qFlat ? qFlat.q : displayList[currentIndex];
@@ -862,6 +978,28 @@ export default function App() {
       return next;
     });
 
+    if (readQuestionFirst && !weakMode) {
+      const rid = rqStepRecallId(histKey, idx);
+      const streaks = loadRqWrongStreaks();
+      if (wasCorrect) {
+        delete streaks[rid];
+      } else {
+        const n = (streaks[rid] || 0) + 1;
+        if (n >= RQ_RECALL_WRONG_STREAK) {
+          setRqRecallSet((prev) => {
+            const next = new Set(prev);
+            next.add(rid);
+            saveRqRecallSet(next);
+            return next;
+          });
+          delete streaks[rid];
+        } else {
+          streaks[rid] = n;
+        }
+      }
+      saveRqWrongStreaks(streaks);
+    }
+
     const extracted = extractKaisetsuForChoice(q.解説 || "", idx + 1);
     const text = extracted
       || "（Notionの解説から、この選択肢に対応する段落を自動では切り出せませんでした。解説の体裁が（１）（２）形式などの場合に認識しやすくなります。）";
@@ -878,6 +1016,15 @@ export default function App() {
     if (readQuestionFirst && weakMode && rqWeakFlatUnits.length > 0) {
       const si = stepIdx;
       const ok = rqMarks[si] === officialSeiExpected(si);
+      const rid = rqStepRecallId(histKey, si);
+      if (rqRecallSet.has(rid)) {
+        setRqRecallSet((prev) => {
+          const next = new Set(prev);
+          next.delete(rid);
+          saveRqRecallSet(next);
+          return next;
+        });
+      }
       setSessionAnswers((prev) => {
         const n = [...prev];
         const tot = rqWeakFlatUnits.length;
@@ -1072,7 +1219,7 @@ export default function App() {
       {weakMode && (
         <div style={{ fontSize: 12, color: "#dc2626", marginBottom: 8, padding: "6px 12px", background: "#fef2f2", borderRadius: 6 }}>
           {readQuestionFirst ? (
-            <>⚠️ 一問一答ON時の苦手順は、<strong>各記述（設問）ごとの累計正答率</strong>が低い順に出題します。未回答の設問は末尾です。4択のまとまりとは無関係に、設問単位で進みます。</>
+            <>⚠️ 一問一答×苦手順：各記述の累計正答率が低い順（未回答は末尾）。<strong>{RQ_MASTERED_MIN_ATTEMPTS}回以上・正答率{Math.round(RQ_MASTERED_RATE * 100)}%以上</strong>の設問は除外。通常一問一答で<strong>{RQ_RECALL_WRONG_STREAK}回連続誤答</strong>した設問は呼び戻し（先頭付近）で再出題します。</>
           ) : (
             <>⚠️ 累計正答率の低い順に出題しています。未回答の問題は末尾に並びます。</>
           )}
@@ -1086,7 +1233,7 @@ export default function App() {
           justifyContent: "space-between",
         }}>
           <div style={{ flex: "1 1 240px", lineHeight: 1.55 }}>
-            一問一答：各設問は選択肢の記述です。<strong>妥当な記述</strong>には「<strong>正</strong>」、<strong>不適当な記述</strong>には「<strong>誤</strong>」が正しいマークです（「正しいものを選べ」形式では正答の肢＝「正」、「誤り／不適当なものを選べ」形式では正答の肢＝「誤」として問題文から自動判定）。解答後に Notion の解説のうち<strong>該当箇所のみ</strong>を表示します。途中で離れる場合は<strong>中断</strong>を押すと、科目・年度・進行状況が保存され、<strong>再開</strong>で続きから再開できます。
+            一問一答：各設問は選択肢の記述です。<strong>妥当な記述</strong>には「<strong>正</strong>」、<strong>不適当な記述</strong>には「<strong>誤</strong>」が正しいマークです（「正しいものを選べ」形式では正答の肢＝「正」、「誤り／不適当なものを選べ」形式では正答の肢＝「誤」として問題文から自動判定）。解答後に Notion の解説のうち<strong>該当箇所のみ</strong>を表示します。苦手順OFF時に同じ記述を<strong>{RQ_RECALL_WRONG_STREAK}回連続で誤る</strong>と、苦手順モードへ呼び戻されます。途中で離れる場合は<strong>中断</strong>を押すと、科目・年度・進行状況が保存され、<strong>再開</strong>で続きから再開できます。
           </div>
           {!sessionComplete && (
             <button
