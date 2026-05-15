@@ -43,6 +43,7 @@ function isNegativeAnswerChoiceQuestion(problemText) {
 }
 
 const LS_RQ_RESUME = "architect_quiz_rq_resume";
+const LS_RQ_INTERRUPT = "architect_quiz_rq_interrupt";
 const LS_RQ_STEP = "architect_quiz_rq_step_stats";
 
 /** 一問一答：設問 i（0〜3）で「正」が正しいマークか */
@@ -75,27 +76,21 @@ function clearRqResumeStorage() {
   } catch { /* ignore */ }
 }
 
-function hasMeaningfulResumePayload(d) {
-  if (!d || typeof d !== "object") return false;
-  if ((d.currentIndex ?? 0) > 0) return true;
-  if (d.rqReview) return true;
-  if (d.showResult && !d.rqReview) return true;
-  if (Array.isArray(d.rqMarks) && d.rqMarks.some((m) => m !== null && m !== undefined)) return true;
-  if (d.rqItemExpl) return true;
-  if ((d.rqStep ?? 0) > 0) return true;
-  if (Array.isArray(d.sessionAnswers) && d.sessionAnswers.some(Boolean)) return true;
-  return false;
+function clearRqInterruptStorage() {
+  try {
+    localStorage.removeItem(LS_RQ_INTERRUPT);
+  } catch { /* ignore */ }
 }
 
-function resumeStateEquals(d, cur) {
-  return (d.currentIndex ?? 0) === cur.currentIndex
-    && (d.rqStep ?? 0) === cur.rqStep
-    && JSON.stringify(d.rqMarks ?? null) === JSON.stringify(cur.rqMarks)
-    && String(d.rqItemExpl ?? "") === String(cur.rqItemExpl ?? "")
-    && !!d.rqReview === !!cur.rqReview
-    && !!d.showResult === !!cur.showResult
-    && (d.selected ?? null) === (cur.selected ?? null)
-    && JSON.stringify(d.sessionAnswers ?? []) === JSON.stringify(cur.sessionAnswers ?? []);
+function readRqInterruptPayload() {
+  try {
+    const raw = localStorage.getItem(LS_RQ_INTERRUPT);
+    if (!raw) return null;
+    const d = JSON.parse(raw);
+    return d && d.v === 1 ? d : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -300,7 +295,8 @@ export default function App() {
   const [rqReview, setRqReview] = useState(false);
   const [rqExplList, setRqExplList] = useState(["", "", "", ""]);
   const [rqStepStats, setRqStepStats] = useState(() => loadRqStepStatsObject());
-  const [showResumePrompt, setShowResumePrompt] = useState(false);
+  const [rqInterruptExists, setRqInterruptExists] = useState(() => !!readRqInterruptPayload());
+  const [rqPendingRestore, setRqPendingRestore] = useState(null);
   const rqHydratingRef = useRef(false);
 
   // localStorage: { "年度_問題番号": { attempts: N, correctCount: N } }
@@ -393,64 +389,11 @@ export default function App() {
   }, [currentIndex, readQuestionFirst, sessionComplete]);
 
   useEffect(() => {
-    if (!readQuestionFirst || sessionComplete) {
-      setShowResumePrompt(false);
-      return;
-    }
-    let raw = null;
-    try {
-      raw = localStorage.getItem(LS_RQ_RESUME);
-    } catch {
-      raw = null;
-    }
-    if (!raw) {
-      setShowResumePrompt(false);
-      return;
-    }
-    let d = null;
-    try {
-      d = JSON.parse(raw);
-    } catch {
-      setShowResumePrompt(false);
-      return;
-    }
-    if (d.sig !== listSig || !hasMeaningfulResumePayload(d)) {
-      setShowResumePrompt(false);
-      return;
-    }
-    const cur = {
-      currentIndex,
-      rqStep,
-      rqMarks,
-      rqItemExpl,
-      rqReview,
-      showResult,
-      selected,
-      sessionAnswers,
-    };
-    setShowResumePrompt(!resumeStateEquals(d, cur));
-  }, [readQuestionFirst, sessionComplete, listSig]);
-
-  useEffect(() => {
-    if (!readQuestionFirst || sessionComplete) return;
-    const payload = {
-      sig: listSig,
-      currentIndex,
-      rqStep,
-      rqMarks,
-      rqItemExpl,
-      rqReview,
-      showResult,
-      selected,
-      sessionAnswers,
-      rqExplList,
-    };
-    try {
-      localStorage.setItem(LS_RQ_RESUME, JSON.stringify(payload));
-    } catch { /* ignore */ }
-  }, [readQuestionFirst, sessionComplete, listSig, currentIndex, rqStep, rqMarks, rqItemExpl, rqReview, showResult, selected, sessionAnswers, rqExplList]);
-
-  function applyRqResume(d) {
+    if (!rqPendingRestore) return;
+    if (questions.length === 0) return;
+    const d = rqPendingRestore;
+    if (d.listSig !== listSig) return;
+    if (displayList.length === 0) return;
     rqHydratingRef.current = true;
     const len = displayList.length;
     const padAnswers = (arr) => {
@@ -468,13 +411,17 @@ export default function App() {
     setShowResult(!!d.showResult);
     setSelected(d.selected === undefined || d.selected === null ? null : d.selected);
     setSessionAnswers(padAnswers(d.sessionAnswers));
-    setShowResumePrompt(false);
+    setReadQuestionFirst(true);
+    clearRqInterruptStorage();
+    clearRqResumeStorage();
+    setRqInterruptExists(false);
+    setRqPendingRestore(null);
     setAiExplanation(null);
     setLoadingAI(false);
     setTimeout(() => {
       rqHydratingRef.current = false;
     }, 0);
-  }
+  }, [rqPendingRestore, listSig, questions.length, displayList.length]);
 
   if (loading) return <div style={{ padding: 24 }}>問題を読み込み中...</div>;
   if (error)   return <div style={{ padding: 24, color: "red" }}>エラー: {error}</div>;
@@ -492,6 +439,9 @@ export default function App() {
 
   function resetSession() {
     clearRqResumeStorage();
+    clearRqInterruptStorage();
+    setRqInterruptExists(false);
+    setRqPendingRestore(null);
     setCurrentIndex(0);
     setSelected(null);
     setShowResult(false);
@@ -506,7 +456,6 @@ export default function App() {
     setRqItemExpl(null);
     setRqReview(false);
     setRqExplList(emptyRqExplList());
-    setShowResumePrompt(false);
   }
 
   function handleShuffle() {
@@ -799,12 +748,59 @@ export default function App() {
     setLoadingArticles(false);
     if (isLastQuestion) {
       clearRqResumeStorage();
+      clearRqInterruptStorage();
+      setRqInterruptExists(false);
       setSessionComplete(true);
     } else {
       setCurrentIndex(currentIndex + 1);
       setSelected(null);
       setShowResult(false);
     }
+  }
+
+  function saveRqInterrupt() {
+    const payload = {
+      v: 1,
+      listSig,
+      filterSubject,
+      filterYear,
+      shuffledOrder,
+      weakMode,
+      currentIndex,
+      rqStep,
+      rqMarks,
+      rqItemExpl,
+      rqReview,
+      showResult,
+      selected,
+      sessionAnswers,
+      rqExplList,
+    };
+    try {
+      localStorage.setItem(LS_RQ_INTERRUPT, JSON.stringify(payload));
+    } catch { /* ignore */ }
+    clearRqResumeStorage();
+    setRqInterruptExists(true);
+    setReadQuestionFirst(false);
+    setRqStep(0);
+    setRqMarks(emptyRqMarks());
+    setRqItemExpl(null);
+    setRqReview(false);
+    setRqExplList(emptyRqExplList());
+    setShowResult(false);
+    setSelected(null);
+    setAiExplanation(null);
+    setLoadingAI(false);
+  }
+
+  function startRqRestoreFromInterrupt() {
+    const d = readRqInterruptPayload();
+    if (!d) return;
+    setFilterSubject(d.filterSubject ?? ALL);
+    setFilterYear(d.filterYear ?? ALL);
+    setShuffledOrder(Array.isArray(d.shuffledOrder) ? d.shuffledOrder : null);
+    setWeakMode(!!d.weakMode);
+    setRqPendingRestore(d);
   }
 
   return (
@@ -853,6 +849,19 @@ export default function App() {
         >
           📝 一問一答{readQuestionFirst ? "（ON）" : ""}
         </button>
+        {rqInterruptExists && !rqPendingRestore && (
+          <button
+            type="button"
+            onClick={startRqRestoreFromInterrupt}
+            style={{
+              padding: "6px 14px", borderRadius: 8, border: "1.5px solid #f59e0b",
+              background: "#fffbeb", color: "#b45309",
+              fontSize: 14, cursor: "pointer", fontWeight: "bold",
+            }}
+          >
+            ▶ 再開
+          </button>
+        )}
         <button onClick={() => setShowMockExam(true)} style={{
           padding: "6px 14px", borderRadius: 8, border: "1.5px solid #059669",
           background: "#fff", color: "#059669",
@@ -882,48 +891,31 @@ export default function App() {
         </div>
       )}
       {readQuestionFirst && (
-        <div style={{ fontSize: 12, color: "#5b21b6", marginBottom: 8, padding: "6px 12px", background: "#f5f3ff", borderRadius: 6, border: "1px solid #ddd6fe" }}>
-          一問一答：各設問は選択肢の記述です。<strong>妥当な記述</strong>には「<strong>正</strong>」、<strong>不適当な記述</strong>には「<strong>誤</strong>」が正しいマークです（「正しいものを選べ」形式では正答の肢＝「正」、「誤り／不適当なものを選べ」形式では正答の肢＝「誤」として問題文から自動判定）。解答後に Notion の解説のうち<strong>該当箇所のみ</strong>を表示します。
-        </div>
-      )}
-      {readQuestionFirst && showResumePrompt && (
         <div style={{
-          marginBottom: 12, padding: "12px 14px", borderRadius: 8,
-          background: "#fffbeb", border: "1px solid #fcd34d", fontSize: 13, color: "#92400e",
+          fontSize: 12, color: "#5b21b6", marginBottom: 8, padding: "10px 12px",
+          background: "#f5f3ff", borderRadius: 6, border: "1px solid #ddd6fe",
+          display: "flex", flexWrap: "wrap", alignItems: "flex-start", gap: 12,
+          justifyContent: "space-between",
         }}>
-          <div style={{ fontWeight: "bold", marginBottom: 8 }}>一問一答の途中経過が保存されています</div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-            <button
-              type="button"
-              onClick={() => {
-                try {
-                  const raw = localStorage.getItem(LS_RQ_RESUME);
-                  if (!raw) return;
-                  const d = JSON.parse(raw);
-                  if (d.sig === listSig) applyRqResume(d);
-                } catch { /* ignore */ }
-              }}
-              style={{
-                padding: "8px 16px", borderRadius: 8, border: "none",
-                background: "#d97706", color: "#fff", fontWeight: "bold", cursor: "pointer",
-              }}
-            >
-              続きから再開
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                resetSession();
-                setReadQuestionFirst(true);
-              }}
-              style={{
-                padding: "8px 16px", borderRadius: 8, border: "1px solid #d6d3d1",
-                background: "#fff", color: "#57534e", fontWeight: "bold", cursor: "pointer",
-              }}
-            >
-              保存データを破棄して最初から
-            </button>
+          <div style={{ flex: "1 1 240px", lineHeight: 1.55 }}>
+            一問一答：各設問は選択肢の記述です。<strong>妥当な記述</strong>には「<strong>正</strong>」、<strong>不適当な記述</strong>には「<strong>誤</strong>」が正しいマークです（「正しいものを選べ」形式では正答の肢＝「正」、「誤り／不適当なものを選べ」形式では正答の肢＝「誤」として問題文から自動判定）。解答後に Notion の解説のうち<strong>該当箇所のみ</strong>を表示します。途中で離れる場合は<strong>中断</strong>を押すと、科目・年度・進行状況が保存され、<strong>再開</strong>で続きから再開できます。
           </div>
+          {!sessionComplete && (
+            <button
+              type="button"
+              onClick={() => {
+                if (!confirm("一問一答を中断し、保存しますか？（ツールバーの「再開」で続きから再開できます）")) return;
+                saveRqInterrupt();
+              }}
+              style={{
+                flexShrink: 0, padding: "8px 16px", borderRadius: 8,
+                border: "1.5px solid #7c3aed", background: "#fff", color: "#5b21b6",
+                fontSize: 13, fontWeight: "bold", cursor: "pointer",
+              }}
+            >
+              中断
+            </button>
+          )}
         </div>
       )}
 
@@ -987,7 +979,7 @@ export default function App() {
       {readQuestionFirst ? (
         <>
           <QuestionFigure url={q.図表URL} />
-          {readQuestionFirst && !showResumePrompt && (
+          {readQuestionFirst && (
             <div style={{
               fontSize: 12, color: "#6b7280", marginBottom: 12, lineHeight: 1.65,
               padding: "8px 12px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb",
@@ -1010,7 +1002,7 @@ export default function App() {
               </div>
             </div>
           )}
-          {!rqReview && !showResumePrompt && (
+          {!rqReview && (
             <div style={{ marginBottom: 20 }}>
               <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 10 }}>
                 記述が妥当なら「正」、不適当なら「誤」を選んでください
