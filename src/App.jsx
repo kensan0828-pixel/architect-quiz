@@ -94,6 +94,30 @@ function readRqInterruptPayload() {
 }
 
 /**
+ * 苦手順：累計正答率の低い順。未回答（履歴なし・0回）は常に末尾。同率・未回答群内は defaultSortFn で並べる。
+ */
+function buildWeakOrderIndices(filtered, history, defaultSortFn) {
+  const getRate = (q) => {
+    const rec = history[`${q.年度}_${q.問題番号}`];
+    if (!rec || !("attempts" in rec) || rec.attempts === 0) return null;
+    return rec.correctCount / rec.attempts;
+  };
+  const indexed = filtered.map((q, i) => ({ q, i }));
+  const answered = indexed
+    .filter(({ q }) => getRate(q) !== null)
+    .sort((a, b) => {
+      const ra = getRate(a.q);
+      const rb = getRate(b.q);
+      if (ra !== rb) return ra - rb;
+      return defaultSortFn(a.q, b.q);
+    });
+  const unanswered = indexed
+    .filter(({ q }) => getRate(q) === null)
+    .sort((a, b) => defaultSortFn(a.q, b.q));
+  return [...answered, ...unanswered].map(({ i }) => i);
+}
+
+/**
  * Notion「解説」全文から、choiceIndex（1〜4）に対応する段落を切り出す。
  */
 function findKaisetsuSectionStart(t, choiceNum, fromIdx) {
@@ -367,11 +391,21 @@ export default function App() {
     return getQuestionNo(a) - getQuestionNo(b);
   };
 
-  const displayList = shuffledOrder
-    ? shuffledOrder.map((i) => filtered[i])
+  const orderIndices = readQuestionFirst && weakMode
+    ? (shuffledOrder && shuffledOrder.length === filtered.length
+      ? shuffledOrder
+      : buildWeakOrderIndices(filtered, history, defaultSort))
+    : shuffledOrder;
+  const displayList = orderIndices
+    ? orderIndices.map((i) => filtered[i])
     : [...filtered].sort(defaultSort);
 
-  const listSig = `${filterSubject}|${filterYear}|${shuffledOrder ? shuffledOrder.join("-") : "sorted"}|${filtered.map((x) => x.id).join(",")}`;
+  const orderKeyForListSig = readQuestionFirst && weakMode
+    ? "rqweak"
+    : shuffledOrder
+      ? shuffledOrder.join("-")
+      : "sorted";
+  const listSig = `${filterSubject}|${filterYear}|${orderKeyForListSig}|${filtered.map((x) => x.id).join(",")}`;
 
   useEffect(() => {
     if (sessionComplete) return;
@@ -471,25 +505,7 @@ export default function App() {
   }
 
   function handleWeakMode() {
-    // 苦手順ソートをその時点で確定し shuffledOrder に固定する
-    // → historyが更新されても displayList が再ソートされない
-    const weakSorted = [...filtered]
-      .map((q, i) => ({ q, i }))
-      .sort(({ q: a }, { q: b }) => {
-        const getRate = q => {
-          const rec = history[`${q.年度}_${q.問題番号}`];
-          if (!rec || !("attempts" in rec) || rec.attempts === 0) return null;
-          return rec.correctCount / rec.attempts;
-        };
-        const ra = getRate(a);
-        const rb = getRate(b);
-        if (ra === null && rb === null) return 0;
-        if (ra === null) return 1;
-        if (rb === null) return -1;
-        if (ra !== rb) return ra - rb;
-        return 0;
-      })
-      .map(({ i }) => i);
+    const weakSorted = buildWeakOrderIndices(filtered, history, defaultSort);
     setShuffledOrder(weakSorted);
     setWeakMode(true);
     resetSession();
@@ -887,7 +903,8 @@ export default function App() {
       </div>
       {weakMode && (
         <div style={{ fontSize: 12, color: "#dc2626", marginBottom: 8, padding: "6px 12px", background: "#fef2f2", borderRadius: 6 }}>
-          ⚠️ 累計正答率の低い順に出題しています。未回答の問題は末尾に表示されます。
+          ⚠️ 累計正答率の低い順に出題しています。未回答の問題は末尾に並びます。
+          {readQuestionFirst && " 一問一答ON時も同じ順で出題されます。"}
         </div>
       )}
       {readQuestionFirst && (
