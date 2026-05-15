@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import Dashboard from "./components/Dashboard";
 import MockExam from "./components/MockExam";
 
@@ -115,6 +115,36 @@ function buildWeakOrderIndices(filtered, history, defaultSortFn) {
     .filter(({ q }) => getRate(q) === null)
     .sort((a, b) => defaultSortFn(a.q, b.q));
   return [...answered, ...unanswered].map(({ i }) => i);
+}
+
+/**
+ * 一問一答の苦手順：各設問（記述1〜4）を単位に、rqStepStats の正答率が低い順。
+ * 未回答（0回）の設問は末尾。同率・未回答群内は問題の defaultSortFn、同一問題内は（１）→（４）。
+ */
+function buildRqStepWeakFlatOrder(baseQuestionList, rqStepStats, defaultSortFn) {
+  const getStepRate = (histKey, step) => {
+    const row = rqStepStats[histKey];
+    const cell = Array.isArray(row) && row[step] ? row[step] : null;
+    if (!cell || cell.attempts === 0) return null;
+    return cell.correctCount / cell.attempts;
+  };
+  const cells = [];
+  for (const q of baseQuestionList) {
+    const histKey = `${q.年度}_${q.問題番号}`;
+    for (let step = 0; step < 4; step++) {
+      cells.push({ q, histKey, step });
+    }
+  }
+  return cells.sort((a, b) => {
+    const ra = getStepRate(a.histKey, a.step);
+    const rb = getStepRate(b.histKey, b.step);
+    if (ra === null && rb !== null) return 1;
+    if (ra !== null && rb === null) return -1;
+    if (ra !== null && rb !== null && ra !== rb) return ra - rb;
+    const qcmp = defaultSortFn(a.q, b.q);
+    if (qcmp !== 0) return qcmp;
+    return a.step - b.step;
+  });
 }
 
 /**
@@ -322,6 +352,12 @@ export default function App() {
   const [rqInterruptExists, setRqInterruptExists] = useState(() => !!readRqInterruptPayload());
   const [rqPendingRestore, setRqPendingRestore] = useState(null);
   const rqHydratingRef = useRef(false);
+  /** 一問一答＋苦手順：設問フラットキューのインデックス */
+  const [rqFlatIndex, setRqFlatIndex] = useState(0);
+  /** 中断復元時に保存した設問順をそのまま再現する */
+  const [rqFlatOrderOverride, setRqFlatOrderOverride] = useState(null);
+  /** 完了画面の種別: mcq | rq | rqflatweak */
+  const [sessionModeTag, setSessionModeTag] = useState(null);
 
   // localStorage: { "年度_問題番号": { attempts: N, correctCount: N } }
   const [history, setHistory] = useState(() => {
@@ -391,17 +427,36 @@ export default function App() {
     return getQuestionNo(a) - getQuestionNo(b);
   };
 
-  const orderIndices = readQuestionFirst && weakMode
-    ? (shuffledOrder && shuffledOrder.length === filtered.length
-      ? shuffledOrder
-      : buildWeakOrderIndices(filtered, history, defaultSort))
-    : shuffledOrder;
-  const displayList = orderIndices
-    ? orderIndices.map((i) => filtered[i])
-    : [...filtered].sort(defaultSort);
+  const orderIndices = shuffledOrder;
+  const baseQuestionList = [...filtered].sort(defaultSort);
+  const displayList = readQuestionFirst && weakMode
+    ? baseQuestionList
+    : orderIndices
+      ? orderIndices.map((i) => filtered[i])
+      : baseQuestionList;
+
+  const flatFreezeKey = `${filterSubject}|${filterYear}|${filtered.map((x) => x.id).join(",")}`;
+  const rqWeakFlatUnits = useMemo(() => {
+    if (!readQuestionFirst || !weakMode) return [];
+    const idMap = new Map(filtered.map((qq) => [qq.id, qq]));
+    if (Array.isArray(rqFlatOrderOverride) && rqFlatOrderOverride.length > 0) {
+      const rebuilt = rqFlatOrderOverride.map(({ id, step }) => {
+        const qq = idMap.get(id);
+        if (!qq || step < 0 || step > 3) return null;
+        return { q: qq, histKey: `${qq.年度}_${qq.問題番号}`, step };
+      }).filter(Boolean);
+      if (rebuilt.length === rqFlatOrderOverride.length) return rebuilt;
+    }
+    return buildRqStepWeakFlatOrder(
+      [...filtered].sort(defaultSort),
+      rqStepStats,
+      defaultSort,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 同一フィルター内では出題順を固定（rqStepStats の更新で並び替えない）
+  }, [readQuestionFirst, weakMode, flatFreezeKey, rqFlatOrderOverride]);
 
   const orderKeyForListSig = readQuestionFirst && weakMode
-    ? "rqweak"
+    ? "rqflatweak"
     : shuffledOrder
       ? shuffledOrder.join("-")
       : "sorted";
@@ -410,6 +465,7 @@ export default function App() {
   useEffect(() => {
     if (sessionComplete) return;
     if (!readQuestionFirst) return;
+    if (readQuestionFirst && weakMode) return;
     if (rqHydratingRef.current) return;
     setRqStep(0);
     setRqMarks(emptyRqMarks());
@@ -420,7 +476,7 @@ export default function App() {
     setSelected(null);
     setAiExplanation(null);
     setLoadingAI(false);
-  }, [currentIndex, readQuestionFirst, sessionComplete]);
+  }, [currentIndex, readQuestionFirst, weakMode, sessionComplete]);
 
   useEffect(() => {
     if (!rqPendingRestore) return;
@@ -429,14 +485,27 @@ export default function App() {
     if (d.listSig !== listSig) return;
     if (displayList.length === 0) return;
     rqHydratingRef.current = true;
-    const len = displayList.length;
+    const flatLen = Array.isArray(d.flatOrder) && d.flatOrder.length > 0 ? d.flatOrder.length : 0;
+    const len = flatLen > 0 ? flatLen : displayList.length;
     const padAnswers = (arr) => {
       const out = [...(arr || [])];
       while (out.length < len) out.push(null);
       return out.slice(0, len);
     };
     const maxIdx = Math.max(0, len - 1);
-    setCurrentIndex(Math.min(Math.max(d.currentIndex ?? 0, 0), maxIdx));
+    const ri = Math.min(Math.max(d.rqFlatIndex ?? 0, 0), maxIdx);
+    setRqFlatIndex(ri);
+    if (Array.isArray(d.flatOrder) && d.flatOrder.length > 0) {
+      setRqFlatOrderOverride(d.flatOrder);
+      const ent = d.flatOrder[ri];
+      if (ent?.id) {
+        const qix = baseQuestionList.findIndex((qq) => qq.id === ent.id);
+        if (qix >= 0) setCurrentIndex(qix);
+      }
+    } else {
+      setRqFlatOrderOverride(null);
+      setCurrentIndex(Math.min(Math.max(d.currentIndex ?? 0, 0), Math.max(0, displayList.length - 1)));
+    }
     setRqStep(Math.min(Math.max(d.rqStep ?? 0, 0), 3));
     setRqMarks(Array.isArray(d.rqMarks) && d.rqMarks.length === 4 ? d.rqMarks : emptyRqMarks());
     setRqItemExpl(d.rqItemExpl ?? null);
@@ -481,11 +550,14 @@ export default function App() {
     setShowResult(false);
     setSessionAnswers([]);
     setSessionComplete(false);
+    setSessionModeTag(null);
     setAiExplanation(null);
     setLoadingAI(false);
     setArticleLinks(null);
     setLoadingArticles(false);
     setRqStep(0);
+    setRqFlatIndex(0);
+    setRqFlatOrderOverride(null);
     setRqMarks(emptyRqMarks());
     setRqItemExpl(null);
     setRqReview(false);
@@ -536,13 +608,18 @@ export default function App() {
 
   // ── セッション完了画面 ──
   if (sessionComplete) {
-    const correctCount = sessionAnswers.filter(a => a?.correct).length;
-    const total = displayList.length;
+    const isFlatWeakDone = sessionModeTag === "rqflatweak";
+    const flatEntries = isFlatWeakDone ? sessionAnswers.filter(Boolean) : [];
+    const correctCount = isFlatWeakDone
+      ? flatEntries.filter((a) => a?.correct).length
+      : sessionAnswers.filter((a) => a?.correct).length;
+    const total = isFlatWeakDone ? Math.max(flatEntries.length, 1) : displayList.length;
     const yearCutoffs = (filterYear !== ALL) ? CUTOFF_SCORES[filterYear] : null;
-    // 特定科目：その科目の足切り / 全科目×特定年度：総得点足切り / 年度「すべて」：判定なし
-    const cutoff = yearCutoffs
-      ? (filterSubject !== ALL ? yearCutoffs[filterSubject] : yearCutoffs["総得点"])
-      : null;
+    const cutoff = isFlatWeakDone
+      ? null
+      : (yearCutoffs
+        ? (filterSubject !== ALL ? yearCutoffs[filterSubject] : yearCutoffs["総得点"])
+        : null);
     const passed = cutoff !== null ? correctCount >= cutoff : null;
 
     return (
@@ -563,11 +640,16 @@ export default function App() {
             {filterSubject !== ALL ? `　${filterSubject}` : "　全科目"}
           </div>
           <div style={{ fontSize: 36, fontWeight: "bold", marginBottom: 4 }}>
-            {correctCount} <span style={{ fontSize: 20, color: "#6b7280" }}>/ {total} 点</span>
+            {correctCount} <span style={{ fontSize: 20, color: "#6b7280" }}>/ {total}{isFlatWeakDone ? " 設問" : " 点"}</span>
           </div>
           <div style={{ fontSize: 14, color: "#6b7280", marginBottom: cutoff !== null ? 16 : 0 }}>
             正答率 {Math.round(correctCount / total * 100)}%
           </div>
+          {isFlatWeakDone && (
+            <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
+              一問一答・苦手順モード（各記述を1設問として集計）
+            </div>
+          )}
           {cutoff !== null && (
             <div style={{
               display: "inline-block",
@@ -581,48 +663,82 @@ export default function App() {
           )}
         </div>
 
-        {/* 問題別正誤一覧 */}
-        <h2 style={{ fontSize: 15, fontWeight: "bold", marginBottom: 10 }}>問題別結果</h2>
+        {/* 問題別／設問別 正誤一覧 */}
+        <h2 style={{ fontSize: 15, fontWeight: "bold", marginBottom: 10 }}>
+          {isFlatWeakDone ? "設問別結果" : "問題別結果"}
+        </h2>
         <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 24 }}>
-          {displayList.map((q, i) => {
-            const ans = sessionAnswers[i];
-            const correct = ans?.correct;
-            const subColor = SUBJECT_COLORS[q.科目] || { bg: "#f3f4f6", color: "#374151" };
-            const rate = getCorrectRate(q);
-            return (
-              <div key={i} style={{
-                display: "flex", alignItems: "center", gap: 10,
-                padding: "10px 14px", borderRadius: 8,
-                background: correct ? "#f0fdf4" : "#fef2f2",
-                border: `1px solid ${correct ? "#bbf7d0" : "#fecaca"}`,
-              }}>
-                <span style={{ fontSize: 16, minWidth: 24 }}>{correct ? "✅" : "❌"}</span>
-                <span style={{ fontSize: 12, color: "#6b7280", minWidth: 72 }}>{q.問題番号}</span>
-                {filterSubject === ALL && (
-                  <span style={{
-                    fontSize: 11, padding: "1px 8px", borderRadius: 99,
-                    background: subColor.bg, color: subColor.color, fontWeight: "bold", whiteSpace: "nowrap",
-                  }}>{q.科目}</span>
-                )}
-                <span style={{
-                  fontSize: 13, flex: 1, color: "#111827",
-                  overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis",
+          {isFlatWeakDone
+            ? flatEntries.map((ans, i) => {
+              const fq = questions.find((qq) => `${qq.年度}_${qq.問題番号}` === ans.flatHistKey);
+              const correct = ans?.correct;
+              const st = ans.flatStep ?? 0;
+              const label = ["（１）", "（２）", "（３）", "（４）"][st] ?? "（？）";
+              const subColor = fq ? (SUBJECT_COLORS[fq.科目] || { bg: "#f3f4f6", color: "#374151" }) : { bg: "#f3f4f6", color: "#374151" };
+              return (
+                <div key={i} style={{
+                  display: "flex", alignItems: "center", gap: 10,
+                  padding: "10px 14px", borderRadius: 8,
+                  background: correct ? "#f0fdf4" : "#fef2f2",
+                  border: `1px solid ${correct ? "#bbf7d0" : "#fecaca"}`,
                 }}>
-                  {q.問題文?.slice(0, 36)}…
-                </span>
-                <span style={{ fontSize: 12, color: "#6b7280", whiteSpace: "nowrap" }}>正答: {q.正答}</span>
-                {rate !== null && (
+                  <span style={{ fontSize: 16, minWidth: 24 }}>{correct ? "✅" : "❌"}</span>
+                  <span style={{ fontSize: 12, color: "#6b7280", whiteSpace: "nowrap" }}>{label}</span>
+                  {fq && filterSubject === ALL && (
+                    <span style={{
+                      fontSize: 11, padding: "1px 8px", borderRadius: 99,
+                      background: subColor.bg, color: subColor.color, fontWeight: "bold", whiteSpace: "nowrap",
+                    }}>{fq.科目}</span>
+                  )}
                   <span style={{
-                    fontSize: 11, whiteSpace: "nowrap",
-                    color: rate < 0.5 ? "#dc2626" : rate < 0.8 ? "#d97706" : "#15803d",
-                    fontWeight: "bold",
+                    fontSize: 13, flex: 1, color: "#111827",
+                    overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis",
                   }}>
-                    累計{Math.round(rate * 100)}%
+                    {fq ? `${fq.年度} ${fq.問題番号} ` : ""}
+                    {fq?.問題文?.slice(0, 28) ?? ans.flatHistKey}…
                   </span>
-                )}
-              </div>
-            );
-          })}
+                </div>
+              );
+            })
+            : displayList.map((q, i) => {
+              const ans = sessionAnswers[i];
+              const correct = ans?.correct;
+              const subColor = SUBJECT_COLORS[q.科目] || { bg: "#f3f4f6", color: "#374151" };
+              const rate = getCorrectRate(q);
+              return (
+                <div key={i} style={{
+                  display: "flex", alignItems: "center", gap: 10,
+                  padding: "10px 14px", borderRadius: 8,
+                  background: correct ? "#f0fdf4" : "#fef2f2",
+                  border: `1px solid ${correct ? "#bbf7d0" : "#fecaca"}`,
+                }}>
+                  <span style={{ fontSize: 16, minWidth: 24 }}>{correct ? "✅" : "❌"}</span>
+                  <span style={{ fontSize: 12, color: "#6b7280", minWidth: 72 }}>{q.問題番号}</span>
+                  {filterSubject === ALL && (
+                    <span style={{
+                      fontSize: 11, padding: "1px 8px", borderRadius: 99,
+                      background: subColor.bg, color: subColor.color, fontWeight: "bold", whiteSpace: "nowrap",
+                    }}>{q.科目}</span>
+                  )}
+                  <span style={{
+                    fontSize: 13, flex: 1, color: "#111827",
+                    overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis",
+                  }}>
+                    {q.問題文?.slice(0, 36)}…
+                  </span>
+                  <span style={{ fontSize: 12, color: "#6b7280", whiteSpace: "nowrap" }}>正答: {q.正答}</span>
+                  {rate !== null && (
+                    <span style={{
+                      fontSize: 11, whiteSpace: "nowrap",
+                      color: rate < 0.5 ? "#dc2626" : rate < 0.8 ? "#d97706" : "#15803d",
+                      fontWeight: "bold",
+                    }}>
+                      累計{Math.round(rate * 100)}%
+                    </span>
+                  )}
+                </div>
+              );
+            })}
         </div>
 
         <button onClick={resetSession} style={{
@@ -637,21 +753,30 @@ export default function App() {
   }
 
   // ── 通常の問題画面 ──
-  const q = displayList[currentIndex];
+  const isRqFlatWeak = readQuestionFirst && weakMode && rqWeakFlatUnits.length > 0;
+  const qFlat = isRqFlatWeak ? rqWeakFlatUnits[Math.min(rqFlatIndex, rqWeakFlatUnits.length - 1)] : null;
+  const q = qFlat ? qFlat.q : displayList[currentIndex];
   if (!q) return <div style={{ padding: 24 }}>問題を読み込み中...</div>;
 
   const choices = [q.選択肢1, q.選択肢2, q.選択肢3, q.選択肢4];
   const officialNum = normalizeChoiceAnswer(q.正答);
   const officialSeiExpected = (i) => getOfficialSeiExpectedForQuestion(q, i);
-  const rqFeedbackOk = !rqReview && rqItemExpl ? rqMarks[rqStep] === officialSeiExpected(rqStep) : null;
+  const stepIdx = isRqFlatWeak ? qFlat.step : rqStep;
+  const rqFeedbackOk = !rqReview && rqItemExpl ? rqMarks[stepIdx] === officialSeiExpected(stepIdx) : null;
   const isCorrect = readQuestionFirst && rqReview
     ? [0, 1, 2, 3].every((i) => rqMarks[i] === officialSeiExpected(i))
     : selected !== null && String(selected + 1) === officialNum;
   const subjectColor = SUBJECT_COLORS[q.科目] || { bg: "#f3f4f6", color: "#374151" };
   const histKey = `${q.年度}_${q.問題番号}`;
   const isLastQuestion = currentIndex + 1 >= displayList.length;
-  const answeredInSession = sessionAnswers.filter(Boolean).length;
-  const correctInSession  = sessionAnswers.filter(a => a?.correct).length;
+  const useFlatProgress = isRqFlatWeak;
+  const flatAnsSlice = useFlatProgress ? sessionAnswers.slice(0, rqWeakFlatUnits.length) : null;
+  const answeredInSession = useFlatProgress
+    ? flatAnsSlice.filter(Boolean).length
+    : sessionAnswers.filter(Boolean).length;
+  const correctInSession = useFlatProgress
+    ? flatAnsSlice.filter((a) => a?.correct).length
+    : sessionAnswers.filter((a) => a?.correct).length;
 
   function handleSelect(index) {
     if (showResult) return;
@@ -664,6 +789,7 @@ export default function App() {
     const newSessionAnswers = [...sessionAnswers];
     newSessionAnswers[currentIndex] = { correct, selected: index + 1 };
     setSessionAnswers(newSessionAnswers);
+    setSessionModeTag("mcq");
 
     // localStorage 更新（旧形式 correct/selected/answeredAt は attempts なしなので無視）
     const prev = (history[histKey] && "attempts" in history[histKey])
@@ -703,6 +829,7 @@ export default function App() {
     setHistory(updated);
     localStorage.setItem("architect_quiz_history", JSON.stringify(updated));
 
+    setSessionModeTag("rq");
     setRqReview(true);
     setShowResult(true);
     setSelected(maruIdx >= 0 ? maruIdx : null);
@@ -710,7 +837,7 @@ export default function App() {
 
   function handleRqMaru(userChoseSei) {
     if (!readQuestionFirst || rqReview || rqItemExpl !== null) return;
-    const idx = rqStep;
+    const idx = stepIdx;
     if (rqMarks[idx] !== null) return;
 
     const nextMarks = [...rqMarks];
@@ -748,6 +875,35 @@ export default function App() {
 
   function handleRqAdvance() {
     if (!rqItemExpl) return;
+    if (readQuestionFirst && weakMode && rqWeakFlatUnits.length > 0) {
+      const si = stepIdx;
+      const ok = rqMarks[si] === officialSeiExpected(si);
+      setSessionAnswers((prev) => {
+        const n = [...prev];
+        const tot = rqWeakFlatUnits.length;
+        while (n.length < tot) n.push(null);
+        n[rqFlatIndex] = {
+          correct: ok,
+          selected: si + 1,
+          flatHistKey: histKey,
+          flatStep: si,
+        };
+        return n;
+      });
+      setRqItemExpl(null);
+      setRqMarks(emptyRqMarks());
+      const nextIdx = rqFlatIndex + 1;
+      if (nextIdx >= rqWeakFlatUnits.length) {
+        setSessionModeTag("rqflatweak");
+        setSessionComplete(true);
+        return;
+      }
+      setRqFlatIndex(nextIdx);
+      const nq = rqWeakFlatUnits[nextIdx].q;
+      const nix = displayList.findIndex((qq) => qq.id === nq.id);
+      if (nix >= 0) setCurrentIndex(nix);
+      return;
+    }
     if (rqStep < 3) {
       setRqStep((s) => s + 1);
       setRqItemExpl(null);
@@ -766,6 +922,8 @@ export default function App() {
       clearRqResumeStorage();
       clearRqInterruptStorage();
       setRqInterruptExists(false);
+      if (readQuestionFirst && rqReview) setSessionModeTag("rq");
+      else if (!readQuestionFirst) setSessionModeTag("mcq");
       setSessionComplete(true);
     } else {
       setCurrentIndex(currentIndex + 1);
@@ -775,6 +933,7 @@ export default function App() {
   }
 
   function saveRqInterrupt() {
+    const isFlat = readQuestionFirst && weakMode && rqWeakFlatUnits.length > 0;
     const payload = {
       v: 1,
       listSig,
@@ -783,6 +942,8 @@ export default function App() {
       shuffledOrder,
       weakMode,
       currentIndex,
+      rqFlatIndex: isFlat ? rqFlatIndex : 0,
+      flatOrder: isFlat ? rqWeakFlatUnits.map((u) => ({ id: u.q.id, step: u.step })) : undefined,
       rqStep,
       rqMarks,
       rqItemExpl,
@@ -799,6 +960,8 @@ export default function App() {
     setRqInterruptExists(true);
     setReadQuestionFirst(false);
     setRqStep(0);
+    setRqFlatIndex(0);
+    setRqFlatOrderOverride(null);
     setRqMarks(emptyRqMarks());
     setRqItemExpl(null);
     setRqReview(false);
@@ -848,8 +1011,13 @@ export default function App() {
           onClick={() => {
             const next = !readQuestionFirst;
             setReadQuestionFirst(next);
-            if (!next) {
+            if (next) {
+              setRqFlatIndex(0);
+              setRqFlatOrderOverride(null);
+            } else {
               setRqStep(0);
+              setRqFlatIndex(0);
+              setRqFlatOrderOverride(null);
               setRqMarks(emptyRqMarks());
               setRqItemExpl(null);
               setRqReview(false);
@@ -903,8 +1071,11 @@ export default function App() {
       </div>
       {weakMode && (
         <div style={{ fontSize: 12, color: "#dc2626", marginBottom: 8, padding: "6px 12px", background: "#fef2f2", borderRadius: 6 }}>
-          ⚠️ 累計正答率の低い順に出題しています。未回答の問題は末尾に並びます。
-          {readQuestionFirst && " 一問一答ON時も同じ順で出題されます。"}
+          {readQuestionFirst ? (
+            <>⚠️ 一問一答ON時の苦手順は、<strong>各記述（設問）ごとの累計正答率</strong>が低い順に出題します。未回答の設問は末尾です。4択のまとまりとは無関係に、設問単位で進みます。</>
+          ) : (
+            <>⚠️ 累計正答率の低い順に出題しています。未回答の問題は末尾に並びます。</>
+          )}
         </div>
       )}
       {readQuestionFirst && (
@@ -956,7 +1127,9 @@ export default function App() {
       </div>
 
       <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>
-        {currentIndex + 1} / {displayList.length} 問
+        {isRqFlatWeak
+          ? <>{rqFlatIndex + 1} / {rqWeakFlatUnits.length} 設問</>
+          : <>{currentIndex + 1} / {displayList.length} 問</>}
       </div>
 
       <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
@@ -1009,8 +1182,9 @@ export default function App() {
                   const n = cell?.attempts ?? 0;
                   const p = n ? Math.round((cell.correctCount / n) * 100) : null;
                   const label = ["（１）", "（２）", "（３）", "（４）"][si];
+                  const cur = readQuestionFirst && si === stepIdx;
                   return (
-                    <span key={si} style={{ whiteSpace: "nowrap" }}>
+                    <span key={si} style={{ whiteSpace: "nowrap", fontWeight: cur ? "bold" : "normal", color: cur ? "#111827" : undefined }}>
                       {label}
                       {n ? ` ${n}回・${p}%` : " —"}
                     </span>
@@ -1031,7 +1205,7 @@ export default function App() {
                 textAlign: "left", fontSize: 14, color: "#111827", lineHeight: 1.6,
                 marginBottom: 16,
               }}>
-                <span>{choices[rqStep]}</span>
+                <span>{choices[stepIdx]}</span>
               </div>
               <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
                 <button
@@ -1067,7 +1241,7 @@ export default function App() {
                       fontSize: 14, fontWeight: "bold", padding: "4px 14px", borderRadius: 8,
                       border: "1.5px solid #6366f1", background: "#eef2ff", color: "#4338ca",
                     }}>
-                      {rqMarks[rqStep] ? "正" : "誤"}
+                      {rqMarks[stepIdx] ? "正" : "誤"}
                     </span>
                     <span style={{
                       fontSize: 28, fontWeight: "bold", lineHeight: 1,
@@ -1101,7 +1275,9 @@ export default function App() {
                     fontSize: 15, fontWeight: "bold", cursor: "pointer",
                   }}
                 >
-                  {rqStep < 3 ? "次の記述へ" : "この問題の結果を見る"}
+                  {isRqFlatWeak
+                    ? (rqFlatIndex + 1 >= rqWeakFlatUnits.length ? "結果を見る →" : "次の設問へ")
+                    : (rqStep < 3 ? "次の記述へ" : "この問題の結果を見る")}
                 </button>
               )}
             </div>
@@ -1121,7 +1297,7 @@ export default function App() {
       )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {(!readQuestionFirst || rqReview) && choices.map((choice, i) => {
+        {(!readQuestionFirst || rqReview) && !isRqFlatWeak && choices.map((choice, i) => {
           const num = String(i + 1);
           const isSelected = selected === i;
           const isAnswer = num === officialNum;
@@ -1163,7 +1339,7 @@ export default function App() {
         })}
       </div>
 
-      {showResult && (!readQuestionFirst || rqReview) && (
+      {showResult && (!readQuestionFirst || rqReview) && !isRqFlatWeak && (
         <div style={{
           marginTop: 24, padding: 16, borderRadius: 8,
           background: isCorrect ? "#f0fdf4" : "#fef2f2",
@@ -1245,7 +1421,7 @@ export default function App() {
         </div>
       )}
 
-      {showResult && (!readQuestionFirst || rqReview) && (
+      {showResult && (!readQuestionFirst || rqReview) && !isRqFlatWeak && (
         <button type="button" onClick={handleNext} style={{
           marginTop: 16, width: "100%", padding: "14px",
           background: isLastQuestion ? "#059669" : "#1d4ed8",
