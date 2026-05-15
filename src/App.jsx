@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Dashboard from "./components/Dashboard";
 import MockExam from "./components/MockExam";
 
@@ -40,6 +40,62 @@ function isNegativeAnswerChoiceQuestion(problemText) {
   const t = problemText || "";
   return /(?:誤って|誤り|誤っている|不正確|不適切|不適当|正しくない|妥当でない|当てはまらない|適当でない)(?:もの|のは|を|に)/i.test(t)
     || /不適当なもの|不適切なもの|誤っているもの|正しくないもの|妥当でないもの/i.test(t);
+}
+
+const LS_RQ_RESUME = "architect_quiz_rq_resume";
+const LS_RQ_STEP = "architect_quiz_rq_step_stats";
+
+/** 一問一答：設問 i（0〜3）で「正」が正しいマークか */
+function getOfficialSeiExpectedForQuestion(q, i) {
+  const officialNum = normalizeChoiceAnswer(q.正答);
+  const negativeAnswerPick = isNegativeAnswerChoiceQuestion(q.問題文);
+  const isDesignated = String(i + 1) === officialNum;
+  return negativeAnswerPick ? !isDesignated : isDesignated;
+}
+
+function emptyRqMarks() {
+  return [null, null, null, null];
+}
+
+function emptyRqExplList() {
+  return ["", "", "", ""];
+}
+
+function loadRqStepStatsObject() {
+  try {
+    return JSON.parse(localStorage.getItem(LS_RQ_STEP) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function clearRqResumeStorage() {
+  try {
+    localStorage.removeItem(LS_RQ_RESUME);
+  } catch { /* ignore */ }
+}
+
+function hasMeaningfulResumePayload(d) {
+  if (!d || typeof d !== "object") return false;
+  if ((d.currentIndex ?? 0) > 0) return true;
+  if (d.rqReview) return true;
+  if (d.showResult && !d.rqReview) return true;
+  if (Array.isArray(d.rqMarks) && d.rqMarks.some((m) => m !== null && m !== undefined)) return true;
+  if (d.rqItemExpl) return true;
+  if ((d.rqStep ?? 0) > 0) return true;
+  if (Array.isArray(d.sessionAnswers) && d.sessionAnswers.some(Boolean)) return true;
+  return false;
+}
+
+function resumeStateEquals(d, cur) {
+  return (d.currentIndex ?? 0) === cur.currentIndex
+    && (d.rqStep ?? 0) === cur.rqStep
+    && JSON.stringify(d.rqMarks ?? null) === JSON.stringify(cur.rqMarks)
+    && String(d.rqItemExpl ?? "") === String(cur.rqItemExpl ?? "")
+    && !!d.rqReview === !!cur.rqReview
+    && !!d.showResult === !!cur.showResult
+    && (d.selected ?? null) === (cur.selected ?? null)
+    && JSON.stringify(d.sessionAnswers ?? []) === JSON.stringify(cur.sessionAnswers ?? []);
 }
 
 /**
@@ -243,6 +299,9 @@ export default function App() {
   const [rqItemExpl, setRqItemExpl] = useState(null);
   const [rqReview, setRqReview] = useState(false);
   const [rqExplList, setRqExplList] = useState(["", "", "", ""]);
+  const [rqStepStats, setRqStepStats] = useState(() => loadRqStepStatsObject());
+  const [showResumePrompt, setShowResumePrompt] = useState(false);
+  const rqHydratingRef = useRef(false);
 
   // localStorage: { "年度_問題番号": { attempts: N, correctCount: N } }
   const [history, setHistory] = useState(() => {
@@ -265,25 +324,6 @@ export default function App() {
         setLoading(false);
       });
   }, []);
-
-  useEffect(() => {
-    if (sessionComplete) return;
-    if (!readQuestionFirst) return;
-    setRqStep(0);
-    setRqMarks([null, null, null, null]);
-    setRqItemExpl(null);
-    setRqReview(false);
-    setRqExplList(["", "", "", ""]);
-    setShowResult(false);
-    setSelected(null);
-    setAiExplanation(null);
-    setLoadingAI(false);
-  }, [currentIndex, readQuestionFirst, sessionComplete]);
-
-  if (loading) return <div style={{ padding: 24 }}>問題を読み込み中...</div>;
-  if (error)   return <div style={{ padding: 24, color: "red" }}>エラー: {error}</div>;
-  if (showDashboard) return <Dashboard onBack={() => setShowDashboard(false)} />;
-  if (showMockExam)  return <MockExam  questions={questions} onBack={() => setShowMockExam(false)} />;
 
   function yearToNumber(year) {
     if (year === "令和元年") return 2019;
@@ -317,6 +357,130 @@ export default function App() {
     return matchSubject && matchYear;
   });
 
+  function getCorrectRate(q) {
+    const rec = history[`${q.年度}_${q.問題番号}`];
+    if (!rec || !("attempts" in rec) || rec.attempts === 0) return null;
+    return rec.correctCount / rec.attempts;
+  }
+
+  const defaultSort = (a, b) => {
+    const yearDiff = yearToNumber(b.年度) - yearToNumber(a.年度);
+    if (yearDiff !== 0) return yearDiff;
+    const subjectDiff = SUBJECT_ORDER.indexOf(a.科目) - SUBJECT_ORDER.indexOf(b.科目);
+    if (subjectDiff !== 0) return subjectDiff;
+    return getQuestionNo(a) - getQuestionNo(b);
+  };
+
+  const displayList = shuffledOrder
+    ? shuffledOrder.map((i) => filtered[i])
+    : [...filtered].sort(defaultSort);
+
+  const listSig = `${filterSubject}|${filterYear}|${shuffledOrder ? shuffledOrder.join("-") : "sorted"}|${filtered.map((x) => x.id).join(",")}`;
+
+  useEffect(() => {
+    if (sessionComplete) return;
+    if (!readQuestionFirst) return;
+    if (rqHydratingRef.current) return;
+    setRqStep(0);
+    setRqMarks(emptyRqMarks());
+    setRqItemExpl(null);
+    setRqReview(false);
+    setRqExplList(emptyRqExplList());
+    setShowResult(false);
+    setSelected(null);
+    setAiExplanation(null);
+    setLoadingAI(false);
+  }, [currentIndex, readQuestionFirst, sessionComplete]);
+
+  useEffect(() => {
+    if (!readQuestionFirst || sessionComplete) {
+      setShowResumePrompt(false);
+      return;
+    }
+    let raw = null;
+    try {
+      raw = localStorage.getItem(LS_RQ_RESUME);
+    } catch {
+      raw = null;
+    }
+    if (!raw) {
+      setShowResumePrompt(false);
+      return;
+    }
+    let d = null;
+    try {
+      d = JSON.parse(raw);
+    } catch {
+      setShowResumePrompt(false);
+      return;
+    }
+    if (d.sig !== listSig || !hasMeaningfulResumePayload(d)) {
+      setShowResumePrompt(false);
+      return;
+    }
+    const cur = {
+      currentIndex,
+      rqStep,
+      rqMarks,
+      rqItemExpl,
+      rqReview,
+      showResult,
+      selected,
+      sessionAnswers,
+    };
+    setShowResumePrompt(!resumeStateEquals(d, cur));
+  }, [readQuestionFirst, sessionComplete, listSig, currentIndex, rqStep, rqMarks, rqItemExpl, rqReview, showResult, selected, sessionAnswers]);
+
+  useEffect(() => {
+    if (!readQuestionFirst || sessionComplete) return;
+    const payload = {
+      sig: listSig,
+      currentIndex,
+      rqStep,
+      rqMarks,
+      rqItemExpl,
+      rqReview,
+      showResult,
+      selected,
+      sessionAnswers,
+      rqExplList,
+    };
+    try {
+      localStorage.setItem(LS_RQ_RESUME, JSON.stringify(payload));
+    } catch { /* ignore */ }
+  }, [readQuestionFirst, sessionComplete, listSig, currentIndex, rqStep, rqMarks, rqItemExpl, rqReview, showResult, selected, sessionAnswers, rqExplList]);
+
+  function applyRqResume(d) {
+    rqHydratingRef.current = true;
+    const len = displayList.length;
+    const padAnswers = (arr) => {
+      const out = [...(arr || [])];
+      while (out.length < len) out.push(null);
+      return out.slice(0, len);
+    };
+    const maxIdx = Math.max(0, len - 1);
+    setCurrentIndex(Math.min(Math.max(d.currentIndex ?? 0, 0), maxIdx));
+    setRqStep(Math.min(Math.max(d.rqStep ?? 0, 0), 3));
+    setRqMarks(Array.isArray(d.rqMarks) && d.rqMarks.length === 4 ? d.rqMarks : emptyRqMarks());
+    setRqItemExpl(d.rqItemExpl ?? null);
+    setRqReview(!!d.rqReview);
+    setRqExplList(Array.isArray(d.rqExplList) && d.rqExplList.length === 4 ? d.rqExplList : emptyRqExplList());
+    setShowResult(!!d.showResult);
+    setSelected(d.selected === undefined || d.selected === null ? null : d.selected);
+    setSessionAnswers(padAnswers(d.sessionAnswers));
+    setShowResumePrompt(false);
+    setAiExplanation(null);
+    setLoadingAI(false);
+    setTimeout(() => {
+      rqHydratingRef.current = false;
+    }, 0);
+  }
+
+  if (loading) return <div style={{ padding: 24 }}>問題を読み込み中...</div>;
+  if (error)   return <div style={{ padding: 24, color: "red" }}>エラー: {error}</div>;
+  if (showDashboard) return <Dashboard onBack={() => setShowDashboard(false)} />;
+  if (showMockExam)  return <MockExam  questions={questions} onBack={() => setShowMockExam(false)} />;
+
   function shuffle(arr) {
     const a = [...arr.keys()];
     for (let i = a.length - 1; i > 0; i--) {
@@ -327,6 +491,7 @@ export default function App() {
   }
 
   function resetSession() {
+    clearRqResumeStorage();
     setCurrentIndex(0);
     setSelected(null);
     setShowResult(false);
@@ -337,10 +502,11 @@ export default function App() {
     setArticleLinks(null);
     setLoadingArticles(false);
     setRqStep(0);
-    setRqMarks([null, null, null, null]);
+    setRqMarks(emptyRqMarks());
     setRqItemExpl(null);
     setRqReview(false);
-    setRqExplList(["", "", "", ""]);
+    setRqExplList(emptyRqExplList());
+    setShowResumePrompt(false);
   }
 
   function handleShuffle() {
@@ -402,25 +568,6 @@ export default function App() {
       <div style={{ padding: 24, color: "#6b7280" }}>該当する問題がありません。</div>
     </div>
   );
-
-  // 正答率を返すヘルパー（未回答は null）
-  function getCorrectRate(q) {
-    const rec = history[`${q.年度}_${q.問題番号}`];
-    if (!rec || !("attempts" in rec) || rec.attempts === 0) return null;
-    return rec.correctCount / rec.attempts;
-  }
-
-  const defaultSort = (a, b) => {
-    const yearDiff = yearToNumber(b.年度) - yearToNumber(a.年度);
-    if (yearDiff !== 0) return yearDiff;
-    const subjectDiff = SUBJECT_ORDER.indexOf(a.科目) - SUBJECT_ORDER.indexOf(b.科目);
-    if (subjectDiff !== 0) return subjectDiff;
-    return getQuestionNo(a) - getQuestionNo(b);
-  };
-
-  const displayList = shuffledOrder
-    ? shuffledOrder.map(i => filtered[i])
-    : [...filtered].sort(defaultSort);
 
   // ── セッション完了画面 ──
   if (sessionComplete) {
@@ -530,16 +677,7 @@ export default function App() {
 
   const choices = [q.選択肢1, q.選択肢2, q.選択肢3, q.選択肢4];
   const officialNum = normalizeChoiceAnswer(q.正答);
-  const negativeAnswerPick = isNegativeAnswerChoiceQuestion(q.問題文);
-  /**
-   * この設問で「正」が正しいマークか。
-   * 正しい記述を選ぶ形式: 正答の肢だけ妥当→「正」が正解。
-   * 「誤り／不適当…を選べ」形式: 正答の肢は不適切→「誤」が正解（問題文から自動判定）。
-   */
-  const officialSeiExpected = (i) => {
-    const isDesignated = String(i + 1) === officialNum;
-    return negativeAnswerPick ? !isDesignated : isDesignated;
-  };
+  const officialSeiExpected = (i) => getOfficialSeiExpectedForQuestion(q, i);
   const rqFeedbackOk = !rqReview && rqItemExpl ? rqMarks[rqStep] === officialSeiExpected(rqStep) : null;
   const isCorrect = readQuestionFirst && rqReview
     ? [0, 1, 2, 3].every((i) => rqMarks[i] === officialSeiExpected(i))
@@ -614,6 +752,24 @@ export default function App() {
     nextMarks[idx] = userChoseSei;
     setRqMarks(nextMarks);
 
+    const wasCorrect = userChoseSei === getOfficialSeiExpectedForQuestion(q, idx);
+    setRqStepStats((prev) => {
+      const next = { ...prev };
+      const blank = () => ({ attempts: 0, correctCount: 0 });
+      const row = Array.isArray(next[histKey]) && next[histKey].length === 4
+        ? next[histKey].map((c) => ({ attempts: c.attempts, correctCount: c.correctCount }))
+        : [blank(), blank(), blank(), blank()];
+      row[idx] = {
+        attempts: row[idx].attempts + 1,
+        correctCount: row[idx].correctCount + (wasCorrect ? 1 : 0),
+      };
+      next[histKey] = row;
+      try {
+        localStorage.setItem(LS_RQ_STEP, JSON.stringify(next));
+      } catch { /* ignore */ }
+      return next;
+    });
+
     const extracted = extractKaisetsuForChoice(q.解説 || "", idx + 1);
     const text = extracted
       || "（Notionの解説から、この選択肢に対応する段落を自動では切り出せませんでした。解説の体裁が（１）（２）形式などの場合に認識しやすくなります。）";
@@ -642,6 +798,7 @@ export default function App() {
     setArticleLinks(null);
     setLoadingArticles(false);
     if (isLastQuestion) {
+      clearRqResumeStorage();
       setSessionComplete(true);
     } else {
       setCurrentIndex(currentIndex + 1);
@@ -677,12 +834,15 @@ export default function App() {
         <button
           type="button"
           onClick={() => {
-            setReadQuestionFirst((v) => !v);
-            setRqStep(0);
-            setRqMarks([null, null, null, null]);
-            setRqItemExpl(null);
-            setRqReview(false);
-            setRqExplList(["", "", "", ""]);
+            const next = !readQuestionFirst;
+            setReadQuestionFirst(next);
+            if (!next) {
+              setRqStep(0);
+              setRqMarks(emptyRqMarks());
+              setRqItemExpl(null);
+              setRqReview(false);
+              setRqExplList(emptyRqExplList());
+            }
           }}
           style={{
             padding: "6px 14px", borderRadius: 8, border: "1.5px solid #7c3aed",
@@ -726,6 +886,46 @@ export default function App() {
           一問一答：各設問は選択肢の記述です。<strong>妥当な記述</strong>には「<strong>正</strong>」、<strong>不適当な記述</strong>には「<strong>誤</strong>」が正しいマークです（「正しいものを選べ」形式では正答の肢＝「正」、「誤り／不適当なものを選べ」形式では正答の肢＝「誤」として問題文から自動判定）。解答後に Notion の解説のうち<strong>該当箇所のみ</strong>を表示します。
         </div>
       )}
+      {readQuestionFirst && showResumePrompt && (
+        <div style={{
+          marginBottom: 12, padding: "12px 14px", borderRadius: 8,
+          background: "#fffbeb", border: "1px solid #fcd34d", fontSize: 13, color: "#92400e",
+        }}>
+          <div style={{ fontWeight: "bold", marginBottom: 8 }}>一問一答の途中経過が保存されています</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+            <button
+              type="button"
+              onClick={() => {
+                try {
+                  const raw = localStorage.getItem(LS_RQ_RESUME);
+                  if (!raw) return;
+                  const d = JSON.parse(raw);
+                  if (d.sig === listSig) applyRqResume(d);
+                } catch { /* ignore */ }
+              }}
+              style={{
+                padding: "8px 16px", borderRadius: 8, border: "none",
+                background: "#d97706", color: "#fff", fontWeight: "bold", cursor: "pointer",
+              }}
+            >
+              続きから再開
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                resetSession();
+                setReadQuestionFirst(true);
+              }}
+              style={{
+                padding: "8px 16px", borderRadius: 8, border: "1px solid #d6d3d1",
+                background: "#fff", color: "#57534e", fontWeight: "bold", cursor: "pointer",
+              }}
+            >
+              保存データを破棄して最初から
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* セッション内進捗 */}
       <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
@@ -751,7 +951,9 @@ export default function App() {
       </div>
 
       <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
-        <span style={{ fontSize: 14, color: "#6b7280" }}>{q.問題番号}</span>
+        {!readQuestionFirst && (
+          <span style={{ fontSize: 14, color: "#6b7280" }}>{q.問題番号}</span>
+        )}
         <span style={{
           fontSize: 13, padding: "2px 10px", borderRadius: 99,
           background: subjectColor.bg, color: subjectColor.color, fontWeight: "bold",
@@ -785,10 +987,33 @@ export default function App() {
       {readQuestionFirst ? (
         <>
           <QuestionFigure url={q.図表URL} />
-          {!rqReview && (
+          {readQuestionFirst && !showResumePrompt && (
+            <div style={{
+              fontSize: 12, color: "#6b7280", marginBottom: 12, lineHeight: 1.65,
+              padding: "8px 12px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb",
+            }}>
+              <span style={{ fontWeight: "bold", color: "#374151" }}>各記述の累計（解答回数・正答率）</span>
+              <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: "6px 14px" }}>
+                {[0, 1, 2, 3].map((si) => {
+                  const row = rqStepStats[histKey];
+                  const cell = row?.[si];
+                  const n = cell?.attempts ?? 0;
+                  const p = n ? Math.round((cell.correctCount / n) * 100) : null;
+                  const label = ["（１）", "（２）", "（３）", "（４）"][si];
+                  return (
+                    <span key={si} style={{ whiteSpace: "nowrap" }}>
+                      {label}
+                      {n ? ` ${n}回・${p}%` : " —"}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {!rqReview && !showResumePrompt && (
             <div style={{ marginBottom: 20 }}>
               <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 10 }}>
-                設問 {rqStep + 1} / 4 — 記述が妥当なら「正」、不適当なら「誤」を選んでください
+                記述が妥当なら「正」、不適当なら「誤」を選んでください
               </div>
               <div style={{
                 display: "flex", alignItems: "flex-start", gap: 12,
@@ -797,7 +1022,6 @@ export default function App() {
                 textAlign: "left", fontSize: 14, color: "#111827", lineHeight: 1.6,
                 marginBottom: 16,
               }}>
-                <span style={{ fontWeight: "bold", minWidth: 20 }}>{rqStep + 1}.</span>
                 <span>{choices[rqStep]}</span>
               </div>
               <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
@@ -868,7 +1092,7 @@ export default function App() {
                     fontSize: 15, fontWeight: "bold", cursor: "pointer",
                   }}
                 >
-                  {rqStep < 3 ? "次の設問へ" : "この問題の結果を見る"}
+                  {rqStep < 3 ? "次の記述へ" : "この問題の結果を見る"}
                 </button>
               )}
             </div>
