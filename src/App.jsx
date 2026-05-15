@@ -429,7 +429,7 @@ export default function App() {
       sessionAnswers,
     };
     setShowResumePrompt(!resumeStateEquals(d, cur));
-  }, [readQuestionFirst, sessionComplete, listSig, currentIndex, rqStep, rqMarks, rqItemExpl, rqReview, showResult, selected, sessionAnswers]);
+  }, [readQuestionFirst, sessionComplete, listSig]);
 
   useEffect(() => {
     if (!readQuestionFirst || sessionComplete) return;
