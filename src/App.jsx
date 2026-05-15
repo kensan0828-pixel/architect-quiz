@@ -47,10 +47,16 @@ const LS_RQ_INTERRUPT = "architect_quiz_rq_interrupt";
 const LS_RQ_STEP = "architect_quiz_rq_step_stats";
 const LS_RQ_RECALL = "architect_quiz_rq_recall";
 const LS_RQ_WRONG_STREAK = "architect_quiz_rq_wrong_streak";
+const LS_MCQ_RECALL = "architect_quiz_mcq_recall";
+const LS_MCQ_WRONG_STREAK = "architect_quiz_mcq_wrong_streak";
 /** 一問一答×苦手順：この回数以上かつ正答率以上なら出題除外 */
 const RQ_MASTERED_MIN_ATTEMPTS = 7;
 const RQ_MASTERED_RATE = 0.85;
 const RQ_RECALL_WRONG_STREAK = 2;
+/** 4択×苦手順：この回数以上かつ正答率以上なら出題除外 */
+const MCQ_MASTERED_MIN_ATTEMPTS = 5;
+const MCQ_MASTERED_RATE = 0.8;
+const MCQ_RECALL_WRONG_STREAK = 2;
 
 function rqStepRecallId(histKey, step) {
   return `${histKey}|${step}`;
@@ -98,6 +104,53 @@ function loadRqWrongStreaks() {
 function saveRqWrongStreaks(obj) {
   try {
     localStorage.setItem(LS_RQ_WRONG_STREAK, JSON.stringify(obj));
+  } catch { /* ignore */ }
+}
+
+function questionHistKey(q) {
+  return `${q.年度}_${q.問題番号}`;
+}
+
+function getMcqHistoryRec(history, q) {
+  const rec = history[questionHistKey(q)];
+  if (!rec || !("attempts" in rec) || rec.attempts === 0) return null;
+  return { attempts: rec.attempts, correctCount: rec.correctCount };
+}
+
+/** 4択問題：5回以上かつ正答率80%以上 */
+function isMcqQuestionMastered(history, q) {
+  const rec = getMcqHistoryRec(history, q);
+  if (!rec || rec.attempts < MCQ_MASTERED_MIN_ATTEMPTS) return false;
+  return rec.correctCount / rec.attempts >= MCQ_MASTERED_RATE;
+}
+
+function loadMcqRecallSet() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(LS_MCQ_RECALL) || "[]");
+    return new Set(Array.isArray(raw) ? raw.filter((s) => typeof s === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveMcqRecallSet(set) {
+  try {
+    localStorage.setItem(LS_MCQ_RECALL, JSON.stringify([...set]));
+  } catch { /* ignore */ }
+}
+
+function loadMcqWrongStreaks() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(LS_MCQ_WRONG_STREAK) || "{}");
+    return raw && typeof raw === "object" ? raw : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveMcqWrongStreaks(obj) {
+  try {
+    localStorage.setItem(LS_MCQ_WRONG_STREAK, JSON.stringify(obj));
   } catch { /* ignore */ }
 }
 
@@ -149,16 +202,31 @@ function readRqInterruptPayload() {
 }
 
 /**
- * 苦手順：累計正答率の低い順。未回答（履歴なし・0回）は常に末尾。同率・未回答群内は defaultSortFn で並べる。
+ * 4択×苦手順：累計正答率の低い順。5回以上・正答率80%以上は除外（recallSet は先頭付近で再出題）。
+ * 未回答は末尾。同率・未回答群内は defaultSortFn で並べる。
  */
-function buildWeakOrderIndices(filtered, history, defaultSortFn) {
+function buildWeakOrderIndices(filtered, history, defaultSortFn, recallSet) {
   const getRate = (q) => {
-    const rec = history[`${q.年度}_${q.問題番号}`];
-    if (!rec || !("attempts" in rec) || rec.attempts === 0) return null;
+    const rec = getMcqHistoryRec(history, q);
+    if (!rec) return null;
     return rec.correctCount / rec.attempts;
   };
-  const indexed = filtered.map((q, i) => ({ q, i }));
-  const answered = indexed
+  const indexed = filtered.map((q, i) => ({ q, i, histKey: questionHistKey(q) }));
+  const recallItems = indexed
+    .filter(({ histKey }) => recallSet.has(histKey))
+    .sort((a, b) => {
+      const ra = getRate(a.q);
+      const rb = getRate(b.q);
+      if (ra === null && rb !== null) return 1;
+      if (ra !== null && rb === null) return -1;
+      if (ra !== null && rb !== null && ra !== rb) return ra - rb;
+      return defaultSortFn(a.q, b.q);
+    });
+  const pool = indexed.filter(({ q, histKey }) => {
+    if (recallSet.has(histKey)) return false;
+    return !isMcqQuestionMastered(history, q);
+  });
+  const answered = pool
     .filter(({ q }) => getRate(q) !== null)
     .sort((a, b) => {
       const ra = getRate(a.q);
@@ -166,10 +234,10 @@ function buildWeakOrderIndices(filtered, history, defaultSortFn) {
       if (ra !== rb) return ra - rb;
       return defaultSortFn(a.q, b.q);
     });
-  const unanswered = indexed
+  const unanswered = pool
     .filter(({ q }) => getRate(q) === null)
     .sort((a, b) => defaultSortFn(a.q, b.q));
-  return [...answered, ...unanswered].map(({ i }) => i);
+  return [...recallItems, ...answered, ...unanswered].map(({ i }) => i);
 }
 
 /**
@@ -410,6 +478,8 @@ export default function App() {
   const [rqStepStats, setRqStepStats] = useState(() => loadRqStepStatsObject());
   /** 通常一問一答で2連続誤答した設問（苦手順へ呼び戻し） */
   const [rqRecallSet, setRqRecallSet] = useState(() => loadRqRecallSet());
+  /** 通常4択で2連続誤答した問題（苦手順へ呼び戻し） */
+  const [mcqRecallSet, setMcqRecallSet] = useState(() => loadMcqRecallSet());
   const [rqInterruptExists, setRqInterruptExists] = useState(() => !!readRqInterruptPayload());
   const [rqPendingRestore, setRqPendingRestore] = useState(null);
   const rqHydratingRef = useRef(false);
@@ -523,9 +593,11 @@ export default function App() {
 
   const orderKeyForListSig = readQuestionFirst && weakMode
     ? "rqflatweak"
-    : shuffledOrder
-      ? shuffledOrder.join("-")
-      : "sorted";
+    : weakMode && !readQuestionFirst
+      ? "mcqweak"
+      : shuffledOrder
+        ? shuffledOrder.join("-")
+        : "sorted";
   const listSig = `${filterSubject}|${filterYear}|${orderKeyForListSig}|${filtered.map((x) => x.id).join(",")}`;
 
   useEffect(() => {
@@ -643,7 +715,7 @@ export default function App() {
   }
 
   function handleWeakMode() {
-    const weakSorted = buildWeakOrderIndices(filtered, history, defaultSort);
+    const weakSorted = buildWeakOrderIndices(filtered, history, defaultSort, mcqRecallSet);
     setShuffledOrder(weakSorted);
     setWeakMode(true);
     resetSession();
@@ -819,8 +891,9 @@ export default function App() {
   }
 
   // ── 通常の問題画面 ──
+  const isMcqWeakEmpty = weakMode && !readQuestionFirst && displayList.length === 0;
   const isRqFlatWeakEmpty = readQuestionFirst && weakMode && rqWeakFlatUnits.length === 0;
-  if (isRqFlatWeakEmpty) {
+  if (isRqFlatWeakEmpty || isMcqWeakEmpty) {
     return (
       <div style={{ maxWidth: 680, margin: "0 auto", padding: "24px 16px", fontFamily: "sans-serif" }}>
         <h1 style={{ fontSize: 20, fontWeight: "bold", marginBottom: 16 }}>建築士試験 問題アプリ</h1>
@@ -830,12 +903,24 @@ export default function App() {
           padding: 20, borderRadius: 8, background: "#f0fdf4", border: "1px solid #bbf7d0",
           marginBottom: 16, lineHeight: 1.65, fontSize: 14, color: "#166534",
         }}>
-          <p style={{ margin: "0 0 8px", fontWeight: "bold" }}>出題対象の設問がありません</p>
-          <p style={{ margin: 0, fontSize: 13, color: "#15803d" }}>
-            各記述で{RQ_MASTERED_MIN_ATTEMPTS}回以上回答し正答率{Math.round(RQ_MASTERED_RATE * 100)}%以上の設問は苦手順から除外しています。
-            通常の一問一答で同じ記述を{RQ_RECALL_WRONG_STREAK}回連続で誤った場合は、苦手順に呼び戻されます。
-          </p>
-          {rqRecallSet.size > 0 && (
+          <p style={{ margin: "0 0 8px", fontWeight: "bold" }}>出題対象がありません</p>
+          {isMcqWeakEmpty ? (
+            <p style={{ margin: 0, fontSize: 13, color: "#15803d" }}>
+              {MCQ_MASTERED_MIN_ATTEMPTS}回以上回答し正答率{Math.round(MCQ_MASTERED_RATE * 100)}%以上の問題は苦手順から除外しています。
+              通常の4択で{MCQ_RECALL_WRONG_STREAK}回連続で誤った問題は、苦手順に呼び戻されます。
+            </p>
+          ) : (
+            <p style={{ margin: 0, fontSize: 13, color: "#15803d" }}>
+              各記述で{RQ_MASTERED_MIN_ATTEMPTS}回以上回答し正答率{Math.round(RQ_MASTERED_RATE * 100)}%以上の設問は苦手順から除外しています。
+              通常の一問一答で同じ記述を{RQ_RECALL_WRONG_STREAK}回連続で誤った場合は、苦手順に呼び戻されます。
+            </p>
+          )}
+          {isMcqWeakEmpty && mcqRecallSet.size > 0 && (
+            <p style={{ margin: "10px 0 0", fontSize: 13, color: "#b45309" }}>
+              呼び戻し待ちの問題が {mcqRecallSet.size} 件あります。下のボタンで苦手順を再構築してください。
+            </p>
+          )}
+          {isRqFlatWeakEmpty && rqRecallSet.size > 0 && (
             <p style={{ margin: "10px 0 0", fontSize: 13, color: "#b45309" }}>
               呼び戻し待ちの設問が {rqRecallSet.size} 件あります。下のボタンで苦手順を再構築してください。
             </p>
@@ -844,19 +929,26 @@ export default function App() {
         <button
           type="button"
           onClick={() => {
-            setRqFlatOrderOverride(null);
-            setRqFlatIndex(0);
-            if (rqRecallSet.size === 0) handleResetOrder();
+            if (isRqFlatWeakEmpty) {
+              setRqFlatOrderOverride(null);
+              setRqFlatIndex(0);
+              if (rqRecallSet.size === 0) handleResetOrder();
+            } else {
+              setShuffledOrder(buildWeakOrderIndices(filtered, history, defaultSort, mcqRecallSet));
+              setCurrentIndex(0);
+              if (mcqRecallSet.size === 0) handleResetOrder();
+            }
           }}
           style={{
             width: "100%", padding: "14px", marginBottom: 8,
-            background: "#7c3aed", color: "#fff", border: "none",
+            background: isMcqWeakEmpty ? "#dc2626" : "#7c3aed",
+            color: "#fff", border: "none",
             borderRadius: 8, fontSize: 15, fontWeight: "bold", cursor: "pointer",
           }}
         >
-          {rqRecallSet.size > 0 ? "苦手順を再構築" : "苦手順を解除"}
+          {(isMcqWeakEmpty ? mcqRecallSet.size : rqRecallSet.size) > 0 ? "苦手順を再構築" : "苦手順を解除"}
         </button>
-        {rqRecallSet.size > 0 && (
+        {((isMcqWeakEmpty && mcqRecallSet.size > 0) || (isRqFlatWeakEmpty && rqRecallSet.size > 0)) && (
           <button type="button" onClick={handleResetOrder} style={{
             width: "100%", padding: "12px",
             background: "#fff", color: "#dc2626", border: "1.5px solid #dc2626",
@@ -920,6 +1012,36 @@ export default function App() {
     };
     setHistory(updated);
     localStorage.setItem("architect_quiz_history", JSON.stringify(updated));
+
+    if (!readQuestionFirst && weakMode && mcqRecallSet.has(histKey)) {
+      setMcqRecallSet((prev) => {
+        const next = new Set(prev);
+        next.delete(histKey);
+        saveMcqRecallSet(next);
+        return next;
+      });
+    }
+
+    if (!readQuestionFirst && !weakMode) {
+      const streaks = loadMcqWrongStreaks();
+      if (correct) {
+        delete streaks[histKey];
+      } else {
+        const n = (streaks[histKey] || 0) + 1;
+        if (n >= MCQ_RECALL_WRONG_STREAK) {
+          setMcqRecallSet((prev) => {
+            const next = new Set(prev);
+            next.add(histKey);
+            saveMcqRecallSet(next);
+            return next;
+          });
+          delete streaks[histKey];
+        } else {
+          streaks[histKey] = n;
+        }
+      }
+      saveMcqWrongStreaks(streaks);
+    }
   }
 
   function finalizeRqReview() {
@@ -1221,7 +1343,7 @@ export default function App() {
           {readQuestionFirst ? (
             <>⚠️ 一問一答×苦手順：各記述の累計正答率が低い順（未回答は末尾）。<strong>{RQ_MASTERED_MIN_ATTEMPTS}回以上・正答率{Math.round(RQ_MASTERED_RATE * 100)}%以上</strong>の設問は除外。通常一問一答で<strong>{RQ_RECALL_WRONG_STREAK}回連続誤答</strong>した設問は呼び戻し（先頭付近）で再出題します。</>
           ) : (
-            <>⚠️ 累計正答率の低い順に出題しています。未回答の問題は末尾に並びます。</>
+            <>⚠️ 4択×苦手順：累計正答率の低い順（未回答は末尾）。<strong>{MCQ_MASTERED_MIN_ATTEMPTS}回以上・正答率{Math.round(MCQ_MASTERED_RATE * 100)}%以上</strong>の問題は除外。通常4択で<strong>{MCQ_RECALL_WRONG_STREAK}回連続誤答</strong>した問題は呼び戻し（先頭付近）で再出題します。</>
           )}
         </div>
       )}
