@@ -21,18 +21,21 @@ function truncateExplanation(text, maxLen = 420) {
 
 const ZEN_CHOICE = { "１": "1", "２": "2", "３": "3", "４": "4" };
 
-/** Notion「正答」を 1〜4 の半角数字に正規化（全角・数値型・文中の数字・selectオブジェクトに対応） */
-function normalizeChoiceAnswer(ans) {
-  if (ans == null || ans === "") return "";
+/** Notion「正答」を 1〜4 の半角数字配列に正規化（複数正答・全角・selectオブジェクトに対応） */
+function normalizeChoiceAnswers(ans) {
+  if (ans == null || ans === "") return [];
   if (typeof ans === "object" && ans !== null && "name" in ans) {
-    return normalizeChoiceAnswer(ans.name);
+    return normalizeChoiceAnswers(ans.name);
   }
-  if (typeof ans === "number" && ans >= 1 && ans <= 4) return String(Math.floor(ans));
-  const s = String(ans).trim();
-  if (ZEN_CHOICE[s]) return ZEN_CHOICE[s];
-  const all = s.match(/[1-4]/g);
-  if (all?.length) return all[all.length - 1];
-  return "";
+  if (typeof ans === "number" && ans >= 1 && ans <= 4) return [String(Math.floor(ans))];
+  const seen = new Set();
+  return String(ans)
+    .replace(/[１２３４]/g, (c) => ZEN_CHOICE[c] || c)
+    .match(/[1-4]/g)?.filter((n) => {
+      if (seen.has(n)) return false;
+      seen.add(n);
+      return true;
+    }) || [];
 }
 
 /** 「誤り／不適当…を選べ」系で、正答の肢は記述として不適切＝マークは「誤」が正しい */
@@ -156,9 +159,9 @@ function saveMcqWrongStreaks(obj) {
 
 /** 一問一答：設問 i（0〜3）で「正」が正しいマークか */
 function getOfficialSeiExpectedForQuestion(q, i) {
-  const officialNum = normalizeChoiceAnswer(q.正答);
+  const officialNums = normalizeChoiceAnswers(q.正答);
   const negativeAnswerPick = isNegativeAnswerChoiceQuestion(q.問題文);
-  const isDesignated = String(i + 1) === officialNum;
+  const isDesignated = officialNums.includes(String(i + 1));
   return negativeAnswerPick ? !isDesignated : isDesignated;
 }
 
@@ -330,10 +333,15 @@ const HINT_CONFIG = {
 };
 
 function QuestionFigure({ url }) {
-  if (!url) return null;
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setFailed(false);
+  }, [url]);
+  if (!url || failed) return null;
   return (
     <div style={{ marginBottom: 24, textAlign: "center" }}>
       <img src={url} alt="図表"
+        onError={() => setFailed(true)}
         style={{ maxWidth: "100%", borderRadius: 8, border: "1px solid #e5e7eb" }} />
     </div>
   );
@@ -967,13 +975,14 @@ export default function App() {
   if (!q) return <div style={{ padding: 24 }}>問題を読み込み中...</div>;
 
   const choices = [q.選択肢1, q.選択肢2, q.選択肢3, q.選択肢4];
-  const officialNum = normalizeChoiceAnswer(q.正答);
+  const officialNums = normalizeChoiceAnswers(q.正答);
+  const officialAnswerLabel = officialNums.join("・") || q.正答;
   const officialSeiExpected = (i) => getOfficialSeiExpectedForQuestion(q, i);
   const stepIdx = isRqFlatWeak ? qFlat.step : rqStep;
   const rqFeedbackOk = !rqReview && rqItemExpl ? rqMarks[stepIdx] === officialSeiExpected(stepIdx) : null;
   const isCorrect = readQuestionFirst && rqReview
     ? [0, 1, 2, 3].every((i) => rqMarks[i] === officialSeiExpected(i))
-    : selected !== null && String(selected + 1) === officialNum;
+    : selected !== null && officialNums.includes(String(selected + 1));
   const subjectColor = SUBJECT_COLORS[q.科目] || { bg: "#f3f4f6", color: "#374151" };
   const histKey = `${q.年度}_${q.問題番号}`;
   const isLastQuestion = currentIndex + 1 >= displayList.length;
@@ -991,7 +1000,7 @@ export default function App() {
     if (readQuestionFirst && !rqReview) return;
     setSelected(index);
     setShowResult(true);
-    const correct = String(index + 1) === officialNum;
+    const correct = officialNums.includes(String(index + 1));
 
     // セッション記録
     const newSessionAnswers = [...sessionAnswers];
@@ -1569,7 +1578,7 @@ export default function App() {
         {(!readQuestionFirst || rqReview) && !isRqFlatWeak && choices.map((choice, i) => {
           const num = String(i + 1);
           const isSelected = selected === i;
-          const isAnswer = num === officialNum;
+          const isAnswer = officialNums.includes(num);
           const rowJudgmentOk = readQuestionFirst && rqReview && rqMarks[i] !== null
             ? rqMarks[i] === officialSeiExpected(i)
             : null;
@@ -1617,11 +1626,11 @@ export default function App() {
           <div style={{ fontSize: 18, fontWeight: "bold", marginBottom: 6, color: isCorrect ? "#15803d" : "#dc2626" }}>
             {readQuestionFirst && rqReview
               ? (isCorrect ? "✅ 全設問の判断が正しかったです" : "❌ 設問の判断に誤りがありました")
-              : (isCorrect ? "✅ 正解！" : `❌ 不正解（正解は ${q.正答} ）`)}
+              : (isCorrect ? "✅ 正解！" : `❌ 不正解（正解は ${officialAnswerLabel} ）`)}
           </div>
           {readQuestionFirst && rqReview && (
             <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 10 }}>
-              正解として選ぶべき肢は <strong>{officialNum}</strong> 番のみです。各設問の解説は Notion 登録内容の該当箇所を上で表示済みです。
+              正解として選ぶべき肢は <strong>{officialAnswerLabel}</strong> 番です。各設問の解説は Notion 登録内容の該当箇所を上で表示済みです。
             </div>
           )}
           {/* この問題の累計成績（今回分を含む） */}
@@ -1647,7 +1656,7 @@ export default function App() {
                 body: JSON.stringify({
                   question: q.問題文,
                   choices: [q.選択肢1, q.選択肢2, q.選択肢3, q.選択肢4],
-                  correct_answer: q.正答,
+                  correct_answer: officialAnswerLabel,
                   user_answer: String(selected + 1),
                   subject: q.科目,
                   year: q.年度,

@@ -7,6 +7,28 @@ function renderWithBold(text) {
   );
 }
 
+const ZEN_CHOICE = { "１": "1", "２": "2", "３": "3", "４": "4" };
+
+function normalizeChoiceAnswers(ans) {
+  if (ans == null || ans === "") return [];
+  if (typeof ans === "object" && ans !== null && "name" in ans) {
+    return normalizeChoiceAnswers(ans.name);
+  }
+  if (typeof ans === "number" && ans >= 1 && ans <= 4) return [String(Math.floor(ans))];
+  const seen = new Set();
+  return String(ans)
+    .replace(/[１２３４]/g, (c) => ZEN_CHOICE[c] || c)
+    .match(/[1-4]/g)?.filter((n) => {
+      if (seen.has(n)) return false;
+      seen.add(n);
+      return true;
+    }) || [];
+}
+
+function getAnswerLabel(ans) {
+  return normalizeChoiceAnswers(ans).join("・") || String(ans || "");
+}
+
 // ── 定数 ────────────────────────────────────────────────────────────────────
 
 const CUTOFF_SCORES = {
@@ -180,7 +202,9 @@ export default function MockExam({ questions, onBack }) {
     setSelected(idx);
     setShowResult(true);
     const q = examQuestions[currentIndex];
-    const correct = String(idx + 1) === q.正答;
+    const answerNums = normalizeChoiceAnswers(q.正答);
+    const answerLabel = answerNums.join("・") || q.正答;
+    const correct = answerNums.includes(String(idx + 1));
     setAnswers(prev => { const next=[...prev]; next[currentIndex]={chosen:idx,correct}; return next; });
     const histKey = `${q.年度}_${q.問題番号}`;
     setHistory(prev => {
@@ -198,7 +222,7 @@ export default function MockExam({ questions, onBack }) {
         body: JSON.stringify({
           question: q.問題文,
           choices: [q.選択肢1, q.選択肢2, q.選択肢3, q.選択肢4],
-          correct_answer: q.正答,
+          correct_answer: answerLabel,
           user_answer: String(idx + 1),
           subject: q.科目,
           year: q.年度,
@@ -329,7 +353,9 @@ export default function MockExam({ questions, onBack }) {
     if (!q) return null;
     const currentSec = examMode==="honban" ? sectionDefs[currentSectionIdx] : null;
     const isLastQuestion = currentSec ? currentIndex>=currentSec.endIdx : currentIndex+1>=examQuestions.length;
-    const isCorrect = selected!==null && String(selected+1)===q.正答;
+    const answerNums = normalizeChoiceAnswers(q.正答);
+    const answerLabel = answerNums.join("・") || q.正答;
+    const isCorrect = selected!==null && answerNums.includes(String(selected+1));
     const choices = [q.選択肢1,q.選択肢2,q.選択肢3,q.選択肢4];
     const subjectColor = SUBJECT_COLORS[q.科目]||{bg:"#f3f4f6",color:"#374151"};
     const answeredCount = answers.filter(Boolean).length;
@@ -366,13 +392,20 @@ export default function MockExam({ questions, onBack }) {
 
         {q.図表URL && (
           <div style={{marginBottom:20,textAlign:"center"}}>
-            <img src={q.図表URL} alt="図表" style={{maxWidth:"100%",borderRadius:8,border:"1px solid #e5e7eb"}} />
+            <img
+              src={q.図表URL}
+              alt="図表"
+              onError={(e) => {
+                e.currentTarget.parentElement.style.display = "none";
+              }}
+              style={{maxWidth:"100%",borderRadius:8,border:"1px solid #e5e7eb"}}
+            />
           </div>
         )}
 
         <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:16}}>
           {choices.map((choice,i) => {
-            const num=String(i+1); const isSelected=selected===i; const isAnswer=num===q.正答;
+            const num=String(i+1); const isSelected=selected===i; const isAnswer=answerNums.includes(num);
             let bg="#fff",border="1.5px solid #e5e7eb",color="#111827";
             if (showResult) {
               if (isAnswer) {bg="#dcfce7";border="1.5px solid #16a34a";color="#15803d";}
@@ -389,7 +422,7 @@ export default function MockExam({ questions, onBack }) {
 
         {showResult && (
           <div style={{padding:"14px 16px",borderRadius:8,marginBottom:12,background:isCorrect?"#f0fdf4":"#fef2f2",border:`1px solid ${isCorrect?"#bbf7d0":"#fecaca"}`}}>
-            <div style={{fontSize:16,fontWeight:"bold",color:isCorrect?"#15803d":"#dc2626"}}>{isCorrect?"✅ 正解！":`❌ 不正解（正解は ${q.正答}）`}</div>
+            <div style={{fontSize:16,fontWeight:"bold",color:isCorrect?"#15803d":"#dc2626"}}>{isCorrect?"✅ 正解！":`❌ 不正解（正解は ${answerLabel}）`}</div>
             {!isCorrect && loadingAI && (
               <div style={{fontSize:13,color:"#6b7280",marginTop:8}}>🤖 AI解説を生成中...</div>
             )}
@@ -487,7 +520,7 @@ export default function MockExam({ questions, onBack }) {
                 <span style={{fontSize:12,color:"#6b7280",minWidth:64}}>{q.問題番号}</span>
                 <span style={{fontSize:11,padding:"1px 7px",borderRadius:99,background:subColor.bg,color:subColor.color,fontWeight:"bold",whiteSpace:"nowrap"}}>{q.科目?.replace("学科","")}</span>
                 <span style={{fontSize:13,flex:1,color:"#111827",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}}>{q.問題文?.slice(0,40)}…</span>
-                <span style={{fontSize:12,color:"#6b7280",whiteSpace:"nowrap"}}>正答: {q.正答}</span>
+                <span style={{fontSize:12,color:"#6b7280",whiteSpace:"nowrap"}}>正答: {getAnswerLabel(q.正答)}</span>
               </div>
             );
           })}
@@ -568,7 +601,7 @@ export default function MockExam({ questions, onBack }) {
                 <span style={{fontSize:12,color:"#6b7280",minWidth:64}}>{q.問題番号}</span>
                 <span style={{fontSize:11,padding:"1px 7px",borderRadius:99,background:subColor.bg,color:subColor.color,fontWeight:"bold",whiteSpace:"nowrap"}}>{q.科目?.replace("学科","")}</span>
                 <span style={{fontSize:13,flex:1,color:"#111827",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}}>{q.問題文?.slice(0,40)}…</span>
-                <span style={{fontSize:12,color:"#6b7280",whiteSpace:"nowrap"}}>正答: {q.正答}</span>
+                <span style={{fontSize:12,color:"#6b7280",whiteSpace:"nowrap"}}>正答: {getAnswerLabel(q.正答)}</span>
               </div>
             );
           })}
