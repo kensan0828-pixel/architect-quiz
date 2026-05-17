@@ -2,6 +2,7 @@ from fastapi import FastAPI, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
+from typing import Optional
 import os
 import httpx
 import re
@@ -259,6 +260,7 @@ class ExplainItemRequest(BaseModel):
     year: str
     question_no: str
     static_explanation: str = ""
+    expected_maru: Optional[bool] = None
 
 
 @app.post("/api/explain-item")
@@ -268,12 +270,13 @@ def explain_item(req: ExplainItemRequest):
     choices_text = "\n".join(lines)
     target = req.choices[ci - 1] if ci - 1 < len(req.choices) else ""
     ca = str(req.correct_answer).strip()
-    expected_maru = str(ci) == ca
+    expected_maru = req.expected_maru if req.expected_maru is not None else str(ci) == ca
     user_label = "〇" if req.user_maru else "×"
+    expected_label = "正" if expected_maru else "誤"
     official = (
-        "この選択肢は「正解として選ぶべき唯一の肢」です。"
+        "この記述は妥当なので、一問一答では「正」が正しいマークです。"
         if expected_maru
-        else "この選択肢は「正解として選ぶべき肢」ではありません。"
+        else "この記述は不適当なので、一問一答では「誤」が正しいマークです。"
     )
 
     if req.static_explanation and req.static_explanation.strip():
@@ -292,12 +295,16 @@ def explain_item(req: ExplainItemRequest):
 【この設問の対象】{ci}番の文:
 {ci}. {target}
 
-【出題上の正解番号】{ca}番のみが正解です。{official}
+【出題上の正解番号】{ca}番です。{official}
 受験者はこの設問に対して **{user_label}** を選びました。
 
 【出力】
-- **{ci}番の選択肢**についてだけ、60〜100字で端的に解説してください。
-- 受験者の〇×が妥当かどうかに触れる一文を含めてもよいですが、冗長にしないでください。
+- **{ci}番の選択肢**についてだけ、150字以内で端的に要約してください。
+- 以下を必ず含めてください：
+  1. 正誤の結論（この設問の正しいマークは「{expected_label}」。数値・用語は正確に）
+  2. そうなる理由・根拠（1文でも必ず残す）
+  3. 間違えやすいひっかけポイントがあれば1点
+- 削ってよい要素：法改正の経緯や歴史的背景、同じ説明の言い換えや補足例、試験に出ない詳細スペック。
 - 見出し・前置き・「公式解説によれば」等は禁止。本文のみ。"""
 
     else:
@@ -313,10 +320,12 @@ def explain_item(req: ExplainItemRequest):
 【この設問の対象】{ci}番:
 {ci}. {target}
 
-【正解】{ca}番のみ。{official}
+【正解】{ca}番。{official}
 受験者のマーク: **{user_label}**
 
-【出力】{ci}番について60〜100字で端的に解説（本文のみ、前置き禁止）。"""
+【出力】
+{ci}番について150字以内で端的に解説（本文のみ、前置き禁止）。
+必ず「正誤の結論」「理由・根拠」「ひっかけポイントがあれば1点」を含める。"""
 
     response = anthropic_client.messages.create(
         model="claude-haiku-4-5-20251001",
