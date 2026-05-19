@@ -11,14 +11,6 @@ function renderWithBold(text) {
   );
 }
 
-/** 解説テキストの冒頭を要約代わりに使う（API失敗時など） */
-function truncateExplanation(text, maxLen = 420) {
-  if (!text || !String(text).trim()) return null;
-  const t = String(text).trim().replace(/\s+/g, " ");
-  if (t.length <= maxLen) return t;
-  return `${t.slice(0, maxLen)}…`;
-}
-
 const ZEN_CHOICE = { "１": "1", "２": "2", "３": "3", "４": "4" };
 
 /** Notion「正答」を 1〜4 の半角数字配列に正規化（複数正答・全角・selectオブジェクトに対応） */
@@ -481,9 +473,6 @@ export default function App() {
   const [rqStep, setRqStep] = useState(0);
   const [rqMarks, setRqMarks] = useState([null, null, null, null]);
   const [rqItemExpl, setRqItemExpl] = useState(null);
-  const [rqItemFullExpl, setRqItemFullExpl] = useState(null);
-  const [rqItemExplLoading, setRqItemExplLoading] = useState(false);
-  const [showRqFullExpl, setShowRqFullExpl] = useState(false);
   const [rqReview, setRqReview] = useState(false);
   const [rqExplList, setRqExplList] = useState(["", "", "", ""]);
   const [rqStepStats, setRqStepStats] = useState(() => loadRqStepStatsObject());
@@ -619,9 +608,6 @@ export default function App() {
     setRqStep(0);
     setRqMarks(emptyRqMarks());
     setRqItemExpl(null);
-    setRqItemFullExpl(null);
-    setRqItemExplLoading(false);
-    setShowRqFullExpl(false);
     setRqReview(false);
     setRqExplList(emptyRqExplList());
     setShowResult(false);
@@ -661,9 +647,6 @@ export default function App() {
     setRqStep(Math.min(Math.max(d.rqStep ?? 0, 0), 3));
     setRqMarks(Array.isArray(d.rqMarks) && d.rqMarks.length === 4 ? d.rqMarks : emptyRqMarks());
     setRqItemExpl(d.rqItemExpl ?? null);
-    setRqItemFullExpl(d.rqItemFullExpl ?? null);
-    setRqItemExplLoading(false);
-    setShowRqFullExpl(!!d.showRqFullExpl);
     setRqReview(!!d.rqReview);
     setRqExplList(Array.isArray(d.rqExplList) && d.rqExplList.length === 4 ? d.rqExplList : emptyRqExplList());
     setShowResult(!!d.showResult);
@@ -715,9 +698,6 @@ export default function App() {
     setRqFlatOrderOverride(null);
     setRqMarks(emptyRqMarks());
     setRqItemExpl(null);
-    setRqItemFullExpl(null);
-    setRqItemExplLoading(false);
-    setShowRqFullExpl(false);
     setRqReview(false);
     setRqExplList(emptyRqExplList());
   }
@@ -1144,57 +1124,18 @@ export default function App() {
     }
 
     const extracted = extractKaisetsuForChoice(q.解説 || "", idx + 1);
-    const fullText = extracted
+    const text = extracted
       || "（Notionの解説から、この選択肢に対応する段落を自動では切り出せませんでした。解説の体裁が（１）（２）形式などの場合に認識しやすくなります。）";
-    const fallbackSummary = truncateExplanation(fullText, 150);
-    setRqItemFullExpl(fullText);
-    setShowRqFullExpl(false);
-    setRqItemExplLoading(!!extracted);
-    setRqItemExpl(fallbackSummary);
+    setRqItemExpl(text);
     setRqExplList((prev) => {
       const n = [...prev];
-      n[idx] = fallbackSummary;
+      n[idx] = text;
       return n;
     });
-    if (extracted) {
-      const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8000";
-      fetch(`${apiBase}/api/explain-item`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          question: q.問題文,
-          choices,
-          correct_answer: officialAnswerLabel,
-          choice_index: idx + 1,
-          user_maru: userChoseSei,
-          expected_maru: getOfficialSeiExpectedForQuestion(q, idx),
-          subject: q.科目,
-          year: q.年度,
-          question_no: q.問題番号,
-          static_explanation: fullText,
-        }),
-      })
-        .then((r) => r.json())
-        .then((data) => {
-          const summary = String(data.explanation || "").trim() || fallbackSummary;
-          setRqItemExpl(summary);
-          setRqExplList((prev) => {
-            const n = [...prev];
-            n[idx] = summary;
-            return n;
-          });
-          setRqItemExplLoading(false);
-        })
-        .catch(() => {
-          setRqItemExpl(fallbackSummary);
-          setRqItemExplLoading(false);
-        });
-    }
   }
 
   function handleRqAdvance() {
     if (!rqItemExpl) return;
-    if (rqItemExplLoading) return;
     if (readQuestionFirst && weakMode && rqWeakFlatUnits.length > 0) {
       const si = stepIdx;
       const ok = rqMarks[si] === officialSeiExpected(si);
@@ -1220,9 +1161,6 @@ export default function App() {
         return n;
       });
       setRqItemExpl(null);
-      setRqItemFullExpl(null);
-      setRqItemExplLoading(false);
-      setShowRqFullExpl(false);
       setRqMarks(emptyRqMarks());
       const nextIdx = rqFlatIndex + 1;
       if (nextIdx >= rqWeakFlatUnits.length) {
@@ -1239,9 +1177,6 @@ export default function App() {
     if (rqStep < 3) {
       setRqStep((s) => s + 1);
       setRqItemExpl(null);
-      setRqItemFullExpl(null);
-      setRqItemExplLoading(false);
-      setShowRqFullExpl(false);
       return;
     }
     finalizeRqReview();
@@ -1282,8 +1217,6 @@ export default function App() {
       rqStep,
       rqMarks,
       rqItemExpl,
-      rqItemFullExpl,
-      showRqFullExpl,
       rqReview,
       showResult,
       selected,
@@ -1301,9 +1234,6 @@ export default function App() {
     setRqFlatOrderOverride(null);
     setRqMarks(emptyRqMarks());
     setRqItemExpl(null);
-    setRqItemFullExpl(null);
-    setRqItemExplLoading(false);
-    setShowRqFullExpl(false);
     setRqReview(false);
     setRqExplList(emptyRqExplList());
     setShowResult(false);
@@ -1360,9 +1290,6 @@ export default function App() {
               setRqFlatOrderOverride(null);
               setRqMarks(emptyRqMarks());
               setRqItemExpl(null);
-              setRqItemFullExpl(null);
-              setRqItemExplLoading(false);
-              setShowRqFullExpl(false);
               setRqReview(false);
               setRqExplList(emptyRqExplList());
             }
@@ -1597,54 +1524,28 @@ export default function App() {
                     </span>
                   </div>
                   <div style={{ fontSize: 12, fontWeight: "bold", color: "#6b7280", marginBottom: 6, textAlign: "left" }}>
-                    要約解説（150字以内）
+                    Notion解説・該当箇所
                   </div>
                   <div style={{
                     padding: "12px 14px", borderRadius: 8, background: "#fafafa",
                     border: "1px solid #e5e7eb", fontSize: 14, color: "#374151", lineHeight: 1.75, whiteSpace: "pre-wrap",
                     textAlign: "left", width: "100%", boxSizing: "border-box",
                   }}>
-                    {rqItemExplLoading ? "要約を生成中…" : renderWithBold(rqItemExpl)}
+                    {renderWithBold(rqItemExpl)}
                   </div>
-                  {rqItemFullExpl && rqItemFullExpl !== rqItemExpl && (
-                    <div style={{ marginTop: 8, textAlign: "left" }}>
-                      <button
-                        type="button"
-                        onClick={() => setShowRqFullExpl((v) => !v)}
-                        style={{
-                          padding: "5px 10px", borderRadius: 6,
-                          border: "1.5px solid #d1d5db", background: "#fff",
-                          color: "#4b5563", fontSize: 12, cursor: "pointer",
-                        }}
-                      >
-                        {showRqFullExpl ? "全文を閉じる" : "全文表示"}
-                      </button>
-                      {showRqFullExpl && (
-                        <div style={{
-                          marginTop: 8, padding: "12px 14px", borderRadius: 8,
-                          background: "#fff", border: "1px solid #e5e7eb",
-                          fontSize: 13, color: "#374151", lineHeight: 1.75,
-                          whiteSpace: "pre-wrap", textAlign: "left",
-                        }}>
-                          {renderWithBold(rqItemFullExpl)}
-                        </div>
-                      )}
-                    </div>
-                  )}
                 </div>
               )}
               {rqItemExpl && (
                 <button
                   type="button"
                   onClick={handleRqAdvance}
-                  disabled={rqItemExplLoading}
                   style={{
                     width: "100%", padding: "14px 16px", borderRadius: 8,
-                    background: rqItemExplLoading ? "#c4b5fd" : "#7c3aed", color: "#fff", border: "none",
-                    fontSize: 15, fontWeight: "bold", cursor: rqItemExplLoading ? "wait" : "pointer",
+                    background: "#7c3aed", color: "#fff", border: "none",
+                    fontSize: 15, fontWeight: "bold", cursor: "pointer",
                   }}
                 >
-                  {rqItemExplLoading ? "要約生成中…" : isRqFlatWeak
+                  {isRqFlatWeak
                     ? (rqFlatIndex + 1 >= rqWeakFlatUnits.length ? "結果を見る →" : "次の設問へ")
                     : (rqStep < 3 ? "次の記述へ" : "この問題の結果を見る")}
                 </button>
@@ -1737,7 +1638,7 @@ export default function App() {
           {q.解説 && !readQuestionFirst && (
             <div style={{ marginBottom: 10, textAlign: "left" }}>
               <div style={{ fontSize: 12, fontWeight: "bold", color: "#6b7280", marginBottom: 6 }}>
-                Notion解説（全文）
+                Notion解説
               </div>
               <div style={{ fontSize: 14, color: "#374151", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
                 {renderWithBold(q.解説)}

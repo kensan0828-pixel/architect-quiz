@@ -425,7 +425,7 @@ export default function MockExam({ questions, onBack }) {
             <div style={{fontSize:16,fontWeight:"bold",color:isCorrect?"#15803d":"#dc2626"}}>{isCorrect?"✅ 正解！":`❌ 不正解（正解は ${answerLabel}）`}</div>
             {q.解説 && (
               <div style={{marginTop:10,padding:"12px 14px",borderRadius:8,background:"#fafafa",border:"1px solid #e5e7eb",textAlign:"left"}}>
-                <div style={{fontSize:12,fontWeight:"bold",color:"#6b7280",marginBottom:6}}>Notion解説（全文）</div>
+                <div style={{fontSize:12,fontWeight:"bold",color:"#6b7280",marginBottom:6}}>Notion解説</div>
                 <div style={{fontSize:14,color:"#374151",lineHeight:1.8,whiteSpace:"pre-wrap"}}>{renderWithBold(q.解説)}</div>
               </div>
             )}
