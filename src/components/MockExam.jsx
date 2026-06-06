@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { questionHistKey } from "../utils";
 
 function renderWithBold(text) {
   if (!text) return null;
@@ -206,7 +207,7 @@ export default function MockExam({ questions, onBack }) {
     const answerLabel = answerNums.join("・") || q.正答;
     const correct = answerNums.includes(String(idx + 1));
     setAnswers(prev => { const next=[...prev]; next[currentIndex]={chosen:idx,correct}; return next; });
-    const histKey = `${q.年度}_${q.問題番号}`;
+    const histKey = questionHistKey(q);
     setHistory(prev => {
       const prevRec = (prev[histKey] && "attempts" in prev[histKey]) ? prev[histKey] : {attempts:0,correctCount:0};
       const updated = { ...prev, [histKey]: { attempts: prevRec.attempts+1, correctCount: prevRec.correctCount+(correct?1:0) } };

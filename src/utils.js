@@ -1,3 +1,26 @@
+/** 学習履歴・設問統計のキー（年度×科目×問題番号で一意） */
+export function questionHistKey(q) {
+  return `${q.年度}_${q.科目}_${q.問題番号}`;
+}
+
+/** 旧形式（科目なし） */
+export function legacyQuestionHistKey(q) {
+  return `${q.年度}_${q.問題番号}`;
+}
+
+/** 履歴キーを分解（新形式・旧形式両対応） */
+export function parseQuestionHistKey(key) {
+  const subjMatch = key.match(/^(.+)_(学科[ⅠⅡⅢⅣⅤ]（[^）]+）)_(No\.\d+)$/);
+  if (subjMatch) {
+    return { year: subjMatch[1], subject: subjMatch[2], problemNo: subjMatch[3] };
+  }
+  const legacy = key.match(/^(.+)_(No\.\d+)$/);
+  if (legacy) {
+    return { year: legacy[1], subject: null, problemNo: legacy[2] };
+  }
+  return null;
+}
+
 // ① オブジェクトのパースと修復
 export function tryParseObject(str) {
   try { return JSON.parse(str); } catch {}

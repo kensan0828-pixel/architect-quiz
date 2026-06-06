@@ -1,14 +1,14 @@
 """
 ocr_to_notion.py
 ================
-sogo_image/ 以下のページ画像を Gemini API でOCRし、
+sogo_image/ 以下のページ画像を Anthropic API（Claude Sonnet）でOCRし、
 Notion DBの「解説」フィールドに上書き登録する。
 
 【必要パッケージ】
-  pip install google-genai httpx python-dotenv Pillow
+  pip install anthropic httpx python-dotenv
 
 【.env に追加する環境変数】
-  GEMINI_API_KEY=your_key_here
+  ANTHROPIC_API_KEY=your_key_here
   （NOTION_TOKEN・NOTION_DATABASE_IDは既存のものを使用）
 
 【使い方】
@@ -28,11 +28,10 @@ import time
 import argparse
 from pathlib import Path
 
+import base64
 import httpx
 from dotenv import load_dotenv
-from PIL import Image
-from google import genai
-from google.genai import types
+import anthropic
 
 load_dotenv()
 
@@ -44,7 +43,8 @@ BASE_DIR = Path(r"C:\Users\Kentaro Oiwa\OneDrive\Desktop\architect-quiz\tools\so
 
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
 NOTION_DATABASE_ID = os.getenv("NOTION_DATABASE_ID")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+SONNET_MODEL = "claude-sonnet-4-6"
 
 # 科目フォルダ名 → Notion 科目 select 値
 SUBJECT_MAP = {
@@ -66,15 +66,15 @@ YEAR_MAP = {
     "R7": "令和7年",
 }
 
-# Gemini API レート制限対策（1リクエストあたりの待機秒数）
-GEMINI_INTERVAL_SEC = 4   # 無料枠: 15 req/min → 4秒間隔で安全圏
+# Anthropic API レート制限対策（1リクエストあたりの待機秒数）
+ANTHROPIC_INTERVAL_SEC = 1.5
 NOTION_INTERVAL_SEC = 0.4  # Notion API: ~3 req/sec まで
 
 # ============================================================
-# Gemini OCR
+# Vision OCR（Claude Sonnet）
 # ============================================================
 
-GEMINI_PROMPT = """\
+OCR_PROMPT = """\
 この画像は一級建築士試験の解答解説書のページです。
 ページに書かれているテキストを、以下のルールに従って正確に文字起こしをしてください。
 
@@ -92,14 +92,36 @@ GEMINI_PROMPT = """\
 """
 
 
-def ocr_page(image_path: Path, client: genai.Client) -> str:
-    """1ページをGemini Vision でOCRし、テキストを返す"""
-    image = Image.open(image_path)
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=[GEMINI_PROMPT, image],
+def ocr_page(image_path: Path, client: anthropic.Anthropic) -> str:
+    """1ページを Claude Sonnet Vision でOCRし、テキストを返す"""
+    suffix = image_path.suffix.lower()
+    media_type = "image/jpeg" if suffix in (".jpg", ".jpeg") else "image/png"
+    data = base64.standard_b64encode(image_path.read_bytes()).decode("utf-8")
+    response = client.messages.create(
+        model=SONNET_MODEL,
+        max_tokens=8192,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": media_type,
+                            "data": data,
+                        },
+                    },
+                    {"type": "text", "text": OCR_PROMPT},
+                ],
+            }
+        ],
     )
-    return response.text.strip()
+    return response.content[0].text.strip()
+
+
+# 後方互換エイリアス
+ocr_page_sonnet = ocr_page
 
 
 # ============================================================
@@ -237,7 +259,7 @@ def process_subject(
     subject_folder: str,
     dry_run: bool,
     save_ocr: bool,
-    client: genai.Client,
+    client: anthropic.Anthropic,
 ) -> None:
     subject_dir = BASE_DIR / year_folder / subject_folder
     notion_subject = SUBJECT_MAP.get(subject_folder)
@@ -266,7 +288,7 @@ def process_subject(
         except Exception as e:
             print(f" ❌ エラー: {e}")
             all_text_parts.append("")  # エラーページは空文字で継続
-        time.sleep(GEMINI_INTERVAL_SEC)
+        time.sleep(ANTHROPIC_INTERVAL_SEC)
 
     full_text = "\n".join(all_text_parts)
 
@@ -328,7 +350,7 @@ def process_subject(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Gemini OCR → Notion 解説登録ツール")
+    parser = argparse.ArgumentParser(description="Claude Sonnet OCR → Notion 解説登録ツール")
     parser.add_argument(
         "--dry-run", action="store_true",
         help="Notionへの書き込みを行わず、OCRと解析結果のみ確認する"
@@ -348,17 +370,17 @@ def main():
     args = parser.parse_args()
 
     # 初期チェック
-    if not GEMINI_API_KEY:
-        print("[ERROR] GEMINI_API_KEY が .env に設定されていません")
+    if not ANTHROPIC_API_KEY:
+        print("[ERROR] ANTHROPIC_API_KEY が .env に設定されていません")
         return
     if not args.dry_run and not NOTION_TOKEN:
         print("[ERROR] NOTION_TOKEN が .env に設定されていません")
         return
 
-    client = genai.Client(api_key=GEMINI_API_KEY)
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
     mode = "【ドライラン + OCR確認】" if args.dry_run else "【本番実行】"
-    print(f"\n{mode} Gemini OCR → Notion 解説登録")
+    print(f"\n{mode} Claude Sonnet OCR → Notion 解説登録 ({SONNET_MODEL})")
     print(f"対象: {BASE_DIR}")
 
     if not BASE_DIR.exists():

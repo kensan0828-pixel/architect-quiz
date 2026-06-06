@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { parseQuestionHistKey } from '../utils';
 
 // 科目定義（問題番号レンジで判定）
 const SUBJECTS = [
@@ -30,13 +31,15 @@ function parseHistory() {
 function computeStats(history) {
   const entries = [];
   Object.entries(history).forEach(([key, val]) => {
-    const match = key.match(/^(.+)_No\.(\d+)$/);
-    if (!match) return;
-    const year = match[1];
-    const num  = parseInt(match[2], 10);
-    const subj = getSubjectForNumber(num);
+    const parsed = parseQuestionHistKey(key);
+    if (!parsed) return;
+    const num = parseInt(parsed.problemNo.replace(/^No\./, ''), 10);
+    if (!num) return;
+    const subj = parsed.subject
+      ? SUBJECTS.find((s) => s.fullLabel === parsed.subject)
+      : getSubjectForNumber(num);
     if (!subj) return;
-    entries.push({ year, num, subject: subj.key, attempts: val.attempts, correct: val.correctCount });
+    entries.push({ year: parsed.year, num, subject: subj.key, attempts: val.attempts, correct: val.correctCount });
   });
 
   // 総計

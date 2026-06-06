@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import Dashboard from "./components/Dashboard";
 import MockExam from "./components/MockExam";
+import { questionHistKey } from "./utils";
 
 // **text** をインライン <strong> にレンダリングするヘルパー
 function renderWithBold(text) {
@@ -57,6 +58,23 @@ function rqStepRecallId(histKey, step) {
   return `${histKey}|${step}`;
 }
 
+function clearRqWrongStreaksForHistKey(histKey) {
+  const streaks = loadRqWrongStreaks();
+  for (let step = 0; step < 4; step++) {
+    delete streaks[rqStepRecallId(histKey, step)];
+  }
+  saveRqWrongStreaks(streaks);
+}
+
+function removeRqRecallForHistKey(recallSet, histKey) {
+  const next = new Set(recallSet);
+  for (let step = 0; step < 4; step++) {
+    next.delete(rqStepRecallId(histKey, step));
+  }
+  saveRqRecallSet(next);
+  return next;
+}
+
 function getRqStepCell(rqStepStats, histKey, step) {
   const row = rqStepStats[histKey];
   const cell = Array.isArray(row) && row[step] ? row[step] : null;
@@ -100,10 +118,6 @@ function saveRqWrongStreaks(obj) {
   try {
     localStorage.setItem(LS_RQ_WRONG_STREAK, JSON.stringify(obj));
   } catch { /* ignore */ }
-}
-
-function questionHistKey(q) {
-  return `${q.年度}_${q.問題番号}`;
 }
 
 function getMcqHistoryRec(history, q) {
@@ -248,7 +262,7 @@ function buildRqStepWeakFlatOrder(baseQuestionList, rqStepStats, defaultSortFn, 
   };
   const cells = [];
   for (const q of baseQuestionList) {
-    const histKey = `${q.年度}_${q.問題番号}`;
+    const histKey = questionHistKey(q);
     for (let step = 0; step < 4; step++) {
       const rid = rqStepRecallId(histKey, step);
       const isRecall = recallSet.has(rid);
@@ -489,8 +503,10 @@ export default function App() {
   const [rqFlatOrderOverride, setRqFlatOrderOverride] = useState(null);
   /** 完了画面の種別: mcq | rq | rqflatweak */
   const [sessionModeTag, setSessionModeTag] = useState(null);
+  /** 一問一答×苦手順：「もう一度チャレンジ」で出題順を再構築するためのラウンド */
+  const [rqWeakRound, setRqWeakRound] = useState(0);
 
-  // localStorage: { "年度_問題番号": { attempts: N, correctCount: N } }
+  // localStorage: { "年度_科目_問題番号": { attempts: N, correctCount: N } }
   const [history, setHistory] = useState(() => {
     try { return JSON.parse(localStorage.getItem("architect_quiz_history") || "{}"); }
     catch { return {}; }
@@ -545,7 +561,7 @@ export default function App() {
   });
 
   function getCorrectRate(q) {
-    const rec = history[`${q.年度}_${q.問題番号}`];
+    const rec = history[questionHistKey(q)];
     if (!rec || !("attempts" in rec) || rec.attempts === 0) return null;
     return rec.correctCount / rec.attempts;
   }
@@ -566,7 +582,7 @@ export default function App() {
       ? orderIndices.map((i) => filtered[i])
       : baseQuestionList;
 
-  const flatFreezeKey = `${filterSubject}|${filterYear}|${filtered.map((x) => x.id).join(",")}`;
+  const flatFreezeKey = `${filterSubject}|${filterYear}|${filtered.map((x) => x.id).join(",")}|wr${rqWeakRound}`;
   const rqWeakFlatUnits = useMemo(() => {
     if (!readQuestionFirst || !weakMode) return [];
     const idMap = new Map(filtered.map((qq) => [qq.id, qq]));
@@ -574,7 +590,7 @@ export default function App() {
       const rebuilt = rqFlatOrderOverride.map(({ id, step }) => {
         const qq = idMap.get(id);
         if (!qq || step < 0 || step > 3) return null;
-        const histKey = `${qq.年度}_${qq.問題番号}`;
+        const histKey = questionHistKey(qq);
         const rid = rqStepRecallId(histKey, step);
         const isRecall = rqRecallSet.has(rid);
         if (!isRecall && isRqStepMastered(rqStepStats, histKey, step)) return null;
@@ -588,8 +604,8 @@ export default function App() {
       defaultSort,
       rqRecallSet,
     );
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 同一フィルター内では出題順を固定（rqStepStats の更新で並び替えない）
-  }, [readQuestionFirst, weakMode, flatFreezeKey, rqFlatOrderOverride, rqRecallSet]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 同一ラウンド内では出題順を固定（rqStepStats の更新で並び替えない）
+  }, [readQuestionFirst, weakMode, flatFreezeKey, rqFlatOrderOverride, rqRecallSet, rqWeakRound]);
 
   const orderKeyForListSig = readQuestionFirst && weakMode
     ? "rqflatweak"
@@ -678,7 +694,7 @@ export default function App() {
     return a;
   }
 
-  function resetSession() {
+  function resetSession({ rebuildRqWeakFlat = false } = {}) {
     clearRqResumeStorage();
     clearRqInterruptStorage();
     setRqInterruptExists(false);
@@ -700,6 +716,11 @@ export default function App() {
     setRqItemExpl(null);
     setRqReview(false);
     setRqExplList(emptyRqExplList());
+    if (rebuildRqWeakFlat) {
+      setRqWeakRound((r) => r + 1);
+    } else {
+      setRqWeakRound(0);
+    }
   }
 
   function handleShuffle() {
@@ -808,7 +829,7 @@ export default function App() {
         <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 24 }}>
           {isFlatWeakDone
             ? flatEntries.map((ans, i) => {
-              const fq = questions.find((qq) => `${qq.年度}_${qq.問題番号}` === ans.flatHistKey);
+              const fq = questions.find((qq) => questionHistKey(qq) === ans.flatHistKey);
               const correct = ans?.correct;
               const st = ans.flatStep ?? 0;
               const label = ["（１）", "（２）", "（３）", "（４）"][st] ?? "（？）";
@@ -879,7 +900,7 @@ export default function App() {
             })}
         </div>
 
-        <button onClick={resetSession} style={{
+        <button onClick={() => resetSession({ rebuildRqWeakFlat: sessionModeTag === "rqflatweak" })} style={{
           width: "100%", padding: "14px",
           background: "#1d4ed8", color: "#fff", border: "none",
           borderRadius: 8, fontSize: 15, fontWeight: "bold", cursor: "pointer",
@@ -976,7 +997,7 @@ export default function App() {
     ? [0, 1, 2, 3].every((i) => rqMarks[i] === officialSeiExpected(i))
     : selected !== null && officialNums.includes(String(selected + 1));
   const subjectColor = SUBJECT_COLORS[q.科目] || { bg: "#f3f4f6", color: "#374151" };
-  const histKey = `${q.年度}_${q.問題番号}`;
+  const histKey = questionHistKey(q);
   const isLastQuestion = currentIndex + 1 >= displayList.length;
   const useFlatProgress = isRqFlatWeak;
   const flatAnsSlice = useFlatProgress ? sessionAnswers.slice(0, rqWeakFlatUnits.length) : null;
@@ -986,6 +1007,9 @@ export default function App() {
   const correctInSession = useFlatProgress
     ? flatAnsSlice.filter((a) => a?.correct).length
     : sessionAnswers.filter((a) => a?.correct).length;
+  const hasRqStepData = readQuestionFirst && [0, 1, 2, 3].some(
+    (si) => (rqStepStats[histKey]?.[si]?.attempts ?? 0) > 0,
+  );
 
   function handleSelect(index) {
     if (showResult) return;
@@ -1132,6 +1156,24 @@ export default function App() {
       n[idx] = text;
       return n;
     });
+  }
+
+  function handleResetCurrentRqStepStats() {
+    const row = rqStepStats[histKey];
+    const hasData = Array.isArray(row) && row.some((c) => (c?.attempts ?? 0) > 0);
+    if (!hasData) return;
+    const label = `${q.年度}　${q.科目}　${q.問題番号}`;
+    if (!confirm(`${label}\n各記述の累計（解答回数・正答率）をリセットしますか？`)) return;
+    setRqStepStats((prev) => {
+      const next = { ...prev };
+      delete next[histKey];
+      try {
+        localStorage.setItem(LS_RQ_STEP, JSON.stringify(next));
+      } catch { /* ignore */ }
+      return next;
+    });
+    clearRqWrongStreaksForHistKey(histKey);
+    setRqRecallSet((prev) => removeRqRecallForHistKey(prev, histKey));
   }
 
   function handleRqAdvance() {
@@ -1444,7 +1486,21 @@ export default function App() {
               fontSize: 12, color: "#6b7280", marginBottom: 12, lineHeight: 1.65,
               padding: "8px 12px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb",
             }}>
-              <span style={{ fontWeight: "bold", color: "#374151" }}>各記述の累計（解答回数・正答率）</span>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                <span style={{ fontWeight: "bold", color: "#374151" }}>各記述の累計（解答回数・正答率）</span>
+                <button
+                  type="button"
+                  onClick={handleResetCurrentRqStepStats}
+                  disabled={!hasRqStepData}
+                  style={{
+                    padding: "2px 10px", borderRadius: 6, fontSize: 11, cursor: hasRqStepData ? "pointer" : "not-allowed",
+                    border: "1.5px solid #e5e7eb", background: "#fff",
+                    color: hasRqStepData ? "#6b7280" : "#d1d5db",
+                  }}
+                >
+                  リセット
+                </button>
+              </div>
               <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: "6px 14px" }}>
                 {[0, 1, 2, 3].map((si) => {
                   const row = rqStepStats[histKey];
