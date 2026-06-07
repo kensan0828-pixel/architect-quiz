@@ -1435,24 +1435,26 @@ export default function App() {
           </button>
         </div>
       )}
-      {/* セッション内進捗 */}
-      <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
-        {answeredInSession > 0 ? (
-          <span>今回 {Math.round(correctInSession / answeredInSession * 100)}%・{correctInSession}/{answeredInSession}問正解</span>
-        ) : (
-          <span>今回の正答率 —</span>
-        )}
-        <button
-          type="button"
-          onClick={handleClearAllHistory}
-          style={{
-            padding: "2px 8px", borderRadius: 6, border: "1.5px solid #e5e7eb",
-            background: "#fff", color: "#9ca3af", fontSize: 11, cursor: "pointer",
-          }}
-        >
-          履歴クリア
-        </button>
-      </div>
+      {/* セッション内進捗（解答中は非表示） */}
+      {!isQuizInProgress && (
+        <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
+          {answeredInSession > 0 ? (
+            <span>今回 {Math.round(correctInSession / answeredInSession * 100)}%・{correctInSession}/{answeredInSession}問正解</span>
+          ) : (
+            <span>今回の正答率 —</span>
+          )}
+          <button
+            type="button"
+            onClick={handleClearAllHistory}
+            style={{
+              padding: "2px 8px", borderRadius: 6, border: "1.5px solid #e5e7eb",
+              background: "#fff", color: "#9ca3af", fontSize: 11, cursor: "pointer",
+            }}
+          >
+            履歴クリア
+          </button>
+        </div>
+      )}
 
       <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>
         {isRqFlatWeak
