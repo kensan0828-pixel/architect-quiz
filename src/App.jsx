@@ -475,6 +475,7 @@ export default function App() {
   const [sessionComplete, setSessionComplete] = useState(false);
   const [showDashboard, setShowDashboard] = useState(false);
   const [showMockExam, setShowMockExam]   = useState(false);
+  const [showQuizHelp, setShowQuizHelp] = useState(false);
   const [aiExplanation, setAiExplanation] = useState(null);
   const [loadingAI, setLoadingAI]         = useState(false);
   const [articleLinks, setArticleLinks]   = useState(null);
@@ -757,7 +758,9 @@ export default function App() {
     <div style={{ maxWidth: 680, margin: "0 auto", padding: "24px 16px", fontFamily: "sans-serif" }}>
       <h1 style={{ fontSize: 20, fontWeight: "bold", marginBottom: 24 }}>建築士試験 問題アプリ</h1>
       <FilterBar subjects={subjects} years={years} filterSubject={filterSubject} filterYear={filterYear}
-        onSubjectChange={handleSubjectChange} onYearChange={handleYearChange} />
+        onSubjectChange={handleSubjectChange} onYearChange={handleYearChange}
+        onHelpClick={() => setShowQuizHelp(true)} />
+      <QuizHelpModal open={showQuizHelp} onClose={() => setShowQuizHelp(false)} />
       <div style={{ padding: 24, color: "#6b7280" }}>該当する問題がありません。</div>
     </div>
   );
@@ -782,7 +785,9 @@ export default function App() {
       <div style={{ maxWidth: 680, margin: "0 auto", padding: "24px 16px", fontFamily: "sans-serif" }}>
         <h1 style={{ fontSize: 20, fontWeight: "bold", marginBottom: 16 }}>建築士試験 問題アプリ</h1>
         <FilterBar subjects={subjects} years={years} filterSubject={filterSubject} filterYear={filterYear}
-          onSubjectChange={handleSubjectChange} onYearChange={handleYearChange} />
+          onSubjectChange={handleSubjectChange} onYearChange={handleYearChange}
+          onHelpClick={() => setShowQuizHelp(true)} />
+        <QuizHelpModal open={showQuizHelp} onClose={() => setShowQuizHelp(false)} />
 
         {/* スコアサマリー */}
         <div style={{
@@ -916,7 +921,9 @@ export default function App() {
       <div style={{ maxWidth: 680, margin: "0 auto", padding: "24px 16px", fontFamily: "sans-serif" }}>
         <h1 style={{ fontSize: 20, fontWeight: "bold", marginBottom: 16 }}>建築士試験 問題アプリ</h1>
         <FilterBar subjects={subjects} years={years} filterSubject={filterSubject} filterYear={filterYear}
-          onSubjectChange={handleSubjectChange} onYearChange={handleYearChange} />
+          onSubjectChange={handleSubjectChange} onYearChange={handleYearChange}
+          onHelpClick={() => setShowQuizHelp(true)} />
+        <QuizHelpModal open={showQuizHelp} onClose={() => setShowQuizHelp(false)} />
         <div style={{
           padding: 20, borderRadius: 8, background: "#f0fdf4", border: "1px solid #bbf7d0",
           marginBottom: 16, lineHeight: 1.65, fontSize: 14, color: "#166534",
@@ -1289,7 +1296,9 @@ export default function App() {
       <h1 style={{ fontSize: 20, fontWeight: "bold", marginBottom: 16 }}>建築士試験 問題アプリ</h1>
 
       <FilterBar subjects={subjects} years={years} filterSubject={filterSubject} filterYear={filterYear}
-        onSubjectChange={handleSubjectChange} onYearChange={handleYearChange} />
+        onSubjectChange={handleSubjectChange} onYearChange={handleYearChange}
+        onHelpClick={() => setShowQuizHelp(true)} />
+      <QuizHelpModal open={showQuizHelp} onClose={() => setShowQuizHelp(false)} />
 
       <div style={{ marginBottom: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
         <button onClick={handleShuffle} style={{
@@ -1335,6 +1344,22 @@ export default function App() {
         >
           📝 一問一答{readQuestionFirst ? "（ON）" : ""}
         </button>
+        {readQuestionFirst && !sessionComplete && (
+          <button
+            type="button"
+            onClick={() => {
+              if (!confirm("一問一答を中断し、保存しますか？（ツールバーの「再開」で続きから再開できます）")) return;
+              saveRqInterrupt();
+            }}
+            style={{
+              padding: "6px 14px", borderRadius: 8, border: "1.5px solid #7c3aed",
+              background: "#fff", color: "#5b21b6",
+              fontSize: 14, cursor: "pointer", fontWeight: "bold",
+            }}
+          >
+            中断
+          </button>
+        )}
         {rqInterruptExists && !rqPendingRestore && (
           <button
             type="button"
@@ -1371,44 +1396,6 @@ export default function App() {
           </button>
         )}
       </div>
-      {weakMode && (
-        <div style={{ fontSize: 12, color: "#dc2626", marginBottom: 8, padding: "6px 12px", background: "#fef2f2", borderRadius: 6 }}>
-          {readQuestionFirst ? (
-            <>⚠️ 一問一答×苦手順：各記述の累計正答率が低い順（未回答は末尾）。<strong>{RQ_MASTERED_MIN_ATTEMPTS}回以上・正答率{Math.round(RQ_MASTERED_RATE * 100)}%以上</strong>の設問は除外。通常一問一答で<strong>{RQ_RECALL_WRONG_STREAK}回連続誤答</strong>した設問は呼び戻し（先頭付近）で再出題します。</>
-          ) : (
-            <>⚠️ 4択×苦手順：累計正答率の低い順（未回答は末尾）。<strong>{MCQ_MASTERED_MIN_ATTEMPTS}回以上・正答率{Math.round(MCQ_MASTERED_RATE * 100)}%以上</strong>の問題は除外。通常4択で<strong>{MCQ_RECALL_WRONG_STREAK}回連続誤答</strong>した問題は呼び戻し（先頭付近）で再出題します。</>
-          )}
-        </div>
-      )}
-      {readQuestionFirst && (
-        <div style={{
-          fontSize: 12, color: "#5b21b6", marginBottom: 8, padding: "10px 12px",
-          background: "#f5f3ff", borderRadius: 6, border: "1px solid #ddd6fe",
-          display: "flex", flexWrap: "wrap", alignItems: "flex-start", gap: 12,
-          justifyContent: "space-between",
-        }}>
-          <div style={{ flex: "1 1 240px", lineHeight: 1.55 }}>
-            一問一答：各設問は選択肢の記述です。<strong>妥当な記述</strong>には「<strong>正</strong>」、<strong>不適当な記述</strong>には「<strong>誤</strong>」が正しいマークです（「正しいものを選べ」形式では正答の肢＝「正」、「誤り／不適当なものを選べ」形式では正答の肢＝「誤」として問題文から自動判定）。解答後に Notion の解説のうち<strong>該当箇所のみ</strong>を表示します。苦手順OFF時に同じ記述を<strong>{RQ_RECALL_WRONG_STREAK}回連続で誤る</strong>と、苦手順モードへ呼び戻されます。途中で離れる場合は<strong>中断</strong>を押すと、科目・年度・進行状況が保存され、<strong>再開</strong>で続きから再開できます。
-          </div>
-          {!sessionComplete && (
-            <button
-              type="button"
-              onClick={() => {
-                if (!confirm("一問一答を中断し、保存しますか？（ツールバーの「再開」で続きから再開できます）")) return;
-                saveRqInterrupt();
-              }}
-              style={{
-                flexShrink: 0, padding: "8px 16px", borderRadius: 8,
-                border: "1.5px solid #7c3aed", background: "#fff", color: "#5b21b6",
-                fontSize: 13, fontWeight: "bold", cursor: "pointer",
-              }}
-            >
-              中断
-            </button>
-          )}
-        </div>
-      )}
-
       {/* セッション内進捗 */}
       <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
         {answeredInSession > 0 ? (
@@ -1512,9 +1499,6 @@ export default function App() {
           )}
           {!rqReview && (
             <div style={{ marginBottom: 20 }}>
-              <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 10 }}>
-                記述が妥当なら「正」、不適当なら「誤」を選んでください
-              </div>
               <div style={{
                 display: "flex", alignItems: "flex-start", gap: 12,
                 width: "100%", background: "#ffffff", border: "1.5px solid #e5e7eb",
@@ -1759,19 +1743,114 @@ export default function App() {
   );
 }
 
-function FilterBar({ subjects, years, filterSubject, filterYear, onSubjectChange, onYearChange }) {
+function FilterBar({ subjects, years, filterSubject, filterYear, onSubjectChange, onYearChange, onHelpClick }) {
   const selectStyle = {
     padding: "6px 12px", borderRadius: 8, border: "1.5px solid #e5e7eb",
     fontSize: 14, background: "#fff", cursor: "pointer",
   };
   return (
-    <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
+    <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap", alignItems: "center" }}>
       <select value={filterSubject} onChange={(e) => onSubjectChange(e.target.value)} style={selectStyle}>
         {subjects.map((s) => <option key={s} value={s}>{s}</option>)}
       </select>
       <select value={filterYear} onChange={(e) => onYearChange(e.target.value)} style={selectStyle}>
         {years.map((y) => <option key={y} value={y}>{y}</option>)}
       </select>
+      {onHelpClick && (
+        <button
+          type="button"
+          onClick={onHelpClick}
+          title="一問一答・苦手順の使い方"
+          style={{
+            padding: "6px 12px", borderRadius: 8, border: "1.5px solid #e5e7eb",
+            background: "#fff", color: "#6b7280", fontSize: 14, cursor: "pointer",
+            fontWeight: "bold", lineHeight: 1,
+          }}
+        >
+          ？
+        </button>
+      )}
+    </div>
+  );
+}
+
+function QuizHelpModal({ open, onClose }) {
+  if (!open) return null;
+  const sectionStyle = { marginBottom: 16, lineHeight: 1.65, fontSize: 13, color: "#374151" };
+  const headingStyle = { fontSize: 14, fontWeight: "bold", color: "#111827", marginBottom: 6 };
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="quiz-help-title"
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, zIndex: 1000,
+        background: "rgba(0,0,0,0.45)", display: "flex",
+        alignItems: "center", justifyContent: "center", padding: 16,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "100%", maxWidth: 520, maxHeight: "85vh", overflowY: "auto",
+          background: "#fff", borderRadius: 12, padding: "20px 22px",
+          boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <h2 id="quiz-help-title" style={{ fontSize: 17, fontWeight: "bold", margin: 0 }}>ヘルプ</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              border: "none", background: "none", fontSize: 22, color: "#9ca3af",
+              cursor: "pointer", lineHeight: 1, padding: 4,
+            }}
+            aria-label="閉じる"
+          >
+            ×
+          </button>
+        </div>
+
+        <section style={sectionStyle}>
+          <div style={headingStyle}>一問一答モード</div>
+          <p style={{ margin: 0 }}>
+            各設問は選択肢の記述です。<strong>妥当な記述</strong>には「<strong>正</strong>」、<strong>不適当な記述</strong>には「<strong>誤</strong>」が正しいマークです（「正しいものを選べ」形式では正答の肢＝「正」、「誤り／不適当なものを選べ」形式では正答の肢＝「誤」として問題文から自動判定）。解答後に Notion の解説のうち<strong>該当箇所のみ</strong>を表示します。苦手順OFF時に同じ記述を<strong>{RQ_RECALL_WRONG_STREAK}回連続で誤る</strong>と、苦手順モードへ呼び戻されます。途中で離れる場合は<strong>中断</strong>を押すと、科目・年度・進行状況が保存され、<strong>再開</strong>で続きから再開できます。
+          </p>
+        </section>
+
+        <section style={sectionStyle}>
+          <div style={headingStyle}>解答の仕方</div>
+          <p style={{ margin: 0 }}>記述が妥当なら「正」、不適当なら「誤」を選んでください。</p>
+        </section>
+
+        <section style={sectionStyle}>
+          <div style={headingStyle}>一問一答×苦手順</div>
+          <p style={{ margin: 0 }}>
+            各記述の累計正答率が低い順（未回答は末尾）。<strong>{RQ_MASTERED_MIN_ATTEMPTS}回以上・正答率{Math.round(RQ_MASTERED_RATE * 100)}%以上</strong>の設問は除外。通常一問一答で<strong>{RQ_RECALL_WRONG_STREAK}回連続誤答</strong>した設問は呼び戻し（先頭付近）で再出題します。
+          </p>
+        </section>
+
+        <section style={{ ...sectionStyle, marginBottom: 0 }}>
+          <div style={headingStyle}>4択×苦手順</div>
+          <p style={{ margin: 0 }}>
+            累計正答率の低い順（未回答は末尾）。<strong>{MCQ_MASTERED_MIN_ATTEMPTS}回以上・正答率{Math.round(MCQ_MASTERED_RATE * 100)}%以上</strong>の問題は除外。通常4択で<strong>{MCQ_RECALL_WRONG_STREAK}回連続誤答</strong>した問題は呼び戻し（先頭付近）で再出題します。
+          </p>
+        </section>
+
+        <button
+          type="button"
+          onClick={onClose}
+          style={{
+            marginTop: 20, width: "100%", padding: "12px",
+            borderRadius: 8, border: "none", background: "#1d4ed8",
+            color: "#fff", fontSize: 14, fontWeight: "bold", cursor: "pointer",
+          }}
+        >
+          閉じる
+        </button>
+      </div>
     </div>
   );
 }
