@@ -58,21 +58,18 @@ function rqStepRecallId(histKey, step) {
   return `${histKey}|${step}`;
 }
 
-function clearRqWrongStreaksForHistKey(histKey) {
-  const streaks = loadRqWrongStreaks();
-  for (let step = 0; step < 4; step++) {
-    delete streaks[rqStepRecallId(histKey, step)];
-  }
-  saveRqWrongStreaks(streaks);
+function hasAnyRqStepData(rqStepStats) {
+  return Object.values(rqStepStats).some(
+    (row) => Array.isArray(row) && row.some((c) => (c?.attempts ?? 0) > 0),
+  );
 }
 
-function removeRqRecallForHistKey(recallSet, histKey) {
-  const next = new Set(recallSet);
-  for (let step = 0; step < 4; step++) {
-    next.delete(rqStepRecallId(histKey, step));
-  }
-  saveRqRecallSet(next);
-  return next;
+function clearAllRqStepTracking() {
+  try {
+    localStorage.removeItem(LS_RQ_STEP);
+    localStorage.removeItem(LS_RQ_RECALL);
+    localStorage.removeItem(LS_RQ_WRONG_STREAK);
+  } catch { /* ignore */ }
 }
 
 function getRqStepCell(rqStepStats, histKey, step) {
@@ -1007,9 +1004,7 @@ export default function App() {
   const correctInSession = useFlatProgress
     ? flatAnsSlice.filter((a) => a?.correct).length
     : sessionAnswers.filter((a) => a?.correct).length;
-  const hasRqStepData = readQuestionFirst && [0, 1, 2, 3].some(
-    (si) => (rqStepStats[histKey]?.[si]?.attempts ?? 0) > 0,
-  );
+  const hasAnyRqStepStats = readQuestionFirst && hasAnyRqStepData(rqStepStats);
 
   function handleSelect(index) {
     if (showResult) return;
@@ -1158,22 +1153,17 @@ export default function App() {
     });
   }
 
-  function handleResetCurrentRqStepStats() {
-    const row = rqStepStats[histKey];
-    const hasData = Array.isArray(row) && row.some((c) => (c?.attempts ?? 0) > 0);
-    if (!hasData) return;
-    const label = `${q.年度}　${q.科目}　${q.問題番号}`;
-    if (!confirm(`${label}\n各記述の累計（解答回数・正答率）をリセットしますか？`)) return;
-    setRqStepStats((prev) => {
-      const next = { ...prev };
-      delete next[histKey];
-      try {
-        localStorage.setItem(LS_RQ_STEP, JSON.stringify(next));
-      } catch { /* ignore */ }
-      return next;
-    });
-    clearRqWrongStreaksForHistKey(histKey);
-    setRqRecallSet((prev) => removeRqRecallForHistKey(prev, histKey));
+  function handleResetAllRqStepStats() {
+    if (!hasAnyRqStepData(rqStepStats)) return;
+    if (!confirm(
+      "全問題の各記述の累計（解答回数・正答率）を一斉にリセットしますか？\nこの操作は取り消せません。",
+    )) return;
+    setRqStepStats({});
+    setRqRecallSet(new Set());
+    clearAllRqStepTracking();
+    if (readQuestionFirst && weakMode) {
+      setRqWeakRound((r) => r + 1);
+    }
   }
 
   function handleRqAdvance() {
@@ -1490,15 +1480,16 @@ export default function App() {
                 <span style={{ fontWeight: "bold", color: "#374151" }}>各記述の累計（解答回数・正答率）</span>
                 <button
                   type="button"
-                  onClick={handleResetCurrentRqStepStats}
-                  disabled={!hasRqStepData}
+                  onClick={handleResetAllRqStepStats}
+                  disabled={!hasAnyRqStepStats}
+                  title="全問題の各記述累計を一斉にリセット"
                   style={{
-                    padding: "2px 10px", borderRadius: 6, fontSize: 11, cursor: hasRqStepData ? "pointer" : "not-allowed",
+                    padding: "2px 10px", borderRadius: 6, fontSize: 11, cursor: hasAnyRqStepStats ? "pointer" : "not-allowed",
                     border: "1.5px solid #e5e7eb", background: "#fff",
-                    color: hasRqStepData ? "#6b7280" : "#d1d5db",
+                    color: hasAnyRqStepStats ? "#6b7280" : "#d1d5db",
                   }}
                 >
-                  リセット
+                  全リセット
                 </button>
               </div>
               <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: "6px 14px" }}>
