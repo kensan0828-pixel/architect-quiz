@@ -1456,35 +1456,36 @@ export default function App() {
         </div>
       )}
 
-      <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>
-        {isRqFlatWeak
-          ? <>{rqFlatIndex + 1} / {rqWeakFlatUnits.length} 設問</>
-          : <>{currentIndex + 1} / {displayList.length} 問</>}
-      </div>
-
       <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
-        {!readQuestionFirst && (
-          <span style={{ fontSize: 14, color: "#6b7280" }}>{q.問題番号}</span>
-        )}
-        <span style={{
-          fontSize: 13, padding: "2px 10px", borderRadius: 99,
-          background: subjectColor.bg, color: subjectColor.color, fontWeight: "bold",
-        }}>
-          {q.科目}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", flex: "1 1 auto", minWidth: 0 }}>
+          {!readQuestionFirst && (
+            <span style={{ fontSize: 14, color: "#6b7280" }}>{q.問題番号}</span>
+          )}
+          <span style={{
+            fontSize: 13, padding: "2px 10px", borderRadius: 99,
+            background: subjectColor.bg, color: subjectColor.color, fontWeight: "bold",
+          }}>
+            {q.科目}
+          </span>
+          <span style={{ fontSize: 13, color: "#6b7280" }}>{q.年度}</span>
+          {(() => {
+            const rate = getCorrectRate(q);
+            if (rate === null) return <span style={{ fontSize: 12, color: "#9ca3af" }}>未回答</span>;
+            const pct = Math.round(rate * 100);
+            const col = rate < 0.5 ? "#dc2626" : rate < 0.8 ? "#d97706" : "#15803d";
+            const bg  = rate < 0.5 ? "#fee2e2" : rate < 0.8 ? "#fef3c7" : "#dcfce7";
+            return (
+              <span style={{ fontSize: 12, padding: "2px 8px", borderRadius: 99, background: bg, color: col, fontWeight: "bold" }}>
+                累計正答率 {pct}%
+              </span>
+            );
+          })()}
+        </div>
+        <span style={{ fontSize: 13, color: "#6b7280", whiteSpace: "nowrap", marginLeft: "auto", flexShrink: 0 }}>
+          {isRqFlatWeak
+            ? <>{rqFlatIndex + 1} / {rqWeakFlatUnits.length} 設問</>
+            : <>{currentIndex + 1} / {displayList.length} 問</>}
         </span>
-        <span style={{ fontSize: 13, color: "#6b7280" }}>{q.年度}</span>
-        {(() => {
-          const rate = getCorrectRate(q);
-          if (rate === null) return <span style={{ fontSize: 12, color: "#9ca3af" }}>未回答</span>;
-          const pct = Math.round(rate * 100);
-          const col = rate < 0.5 ? "#dc2626" : rate < 0.8 ? "#d97706" : "#15803d";
-          const bg  = rate < 0.5 ? "#fee2e2" : rate < 0.8 ? "#fef3c7" : "#dcfce7";
-          return (
-            <span style={{ fontSize: 12, padding: "2px 8px", borderRadius: 99, background: bg, color: col, fontWeight: "bold" }}>
-              累計正答率 {pct}%
-            </span>
-          );
-        })()}
       </div>
 
       <div style={{
@@ -1555,9 +1556,6 @@ export default function App() {
                     <span style={{ fontSize: 12, color: "#6b7280" }}>
                       {rqFeedbackOk ? "（正しいマークを選びました）" : "（正しいマークと異なります）"}
                     </span>
-                  </div>
-                  <div style={{ fontSize: 12, fontWeight: "bold", color: "#6b7280", marginBottom: 6, textAlign: "left" }}>
-                    Notion解説・該当箇所
                   </div>
                   <div style={{
                     padding: "12px 14px", borderRadius: 8, background: "#fafafa",
@@ -1852,13 +1850,20 @@ function QuizHelpModal({ open, onClose }) {
         <section style={sectionStyle}>
           <div style={headingStyle}>一問一答モード</div>
           <p style={{ margin: 0 }}>
-            各設問は選択肢の記述です。<strong>妥当な記述</strong>には「<strong>正</strong>」、<strong>不適当な記述</strong>には「<strong>誤</strong>」が正しいマークです（「正しいものを選べ」形式では正答の肢＝「正」、「誤り／不適当なものを選べ」形式では正答の肢＝「誤」として問題文から自動判定）。解答後に Notion の解説のうち<strong>該当箇所のみ</strong>を表示します。苦手順OFF時に同じ記述を<strong>{RQ_RECALL_WRONG_STREAK}回連続で誤る</strong>と、苦手順モードへ呼び戻されます。途中で離れる場合は<strong>中断</strong>を押すと、科目・年度・進行状況が保存され、<strong>再開</strong>で続きから再開できます。
+            各設問は選択肢の記述です。<strong>妥当な記述</strong>には「<strong>正</strong>」、<strong>不適当な記述</strong>には「<strong>誤</strong>」が正しいマークです（「正しいものを選べ」形式では正答の肢＝「正」、「誤り／不適当なものを選べ」形式では正答の肢＝「誤」として問題文から自動判定）。苦手順OFF時に同じ記述を<strong>{RQ_RECALL_WRONG_STREAK}回連続で誤る</strong>と、苦手順モードへ呼び戻されます。途中で離れる場合は<strong>中断</strong>を押すと、科目・年度・進行状況が保存され、<strong>再開</strong>で続きから再開できます。
           </p>
         </section>
 
         <section style={sectionStyle}>
           <div style={headingStyle}>解答の仕方</div>
           <p style={{ margin: 0 }}>記述が妥当なら「正」、不適当なら「誤」を選んでください。</p>
+        </section>
+
+        <section style={sectionStyle}>
+          <div style={headingStyle}>Notion解説の表示</div>
+          <p style={{ margin: 0 }}>
+            各記述に「正」「誤」を選ぶと、Notion に登録された解説のうち<strong>その記述に対応する箇所のみ</strong>が表示されます（見出しは表示しません）。
+          </p>
         </section>
 
         <section style={sectionStyle}>
