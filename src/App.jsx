@@ -58,12 +58,6 @@ function rqStepRecallId(histKey, step) {
   return `${histKey}|${step}`;
 }
 
-function hasAnyRqStepData(rqStepStats) {
-  return Object.values(rqStepStats).some(
-    (row) => Array.isArray(row) && row.some((c) => (c?.attempts ?? 0) > 0),
-  );
-}
-
 function clearAllRqStepTracking() {
   try {
     localStorage.removeItem(LS_RQ_STEP);
@@ -1011,7 +1005,6 @@ export default function App() {
   const correctInSession = useFlatProgress
     ? flatAnsSlice.filter((a) => a?.correct).length
     : sessionAnswers.filter((a) => a?.correct).length;
-  const hasAnyRqStepStats = readQuestionFirst && hasAnyRqStepData(rqStepStats);
   const isQuizInProgress =
     answeredInSession > 0
     || currentIndex > 0
@@ -1170,11 +1163,12 @@ export default function App() {
     });
   }
 
-  function handleResetAllRqStepStats() {
-    if (!hasAnyRqStepData(rqStepStats)) return;
+  function handleClearAllHistory() {
     if (!confirm(
-      "全問題の各記述の累計（解答回数・正答率）を一斉にリセットしますか？\nこの操作は取り消せません。",
+      "学習履歴（問題の累計・各記述の累計）をすべて削除しますか？\nこの操作は取り消せません。",
     )) return;
+    localStorage.removeItem("architect_quiz_history");
+    setHistory({});
     setRqStepStats({});
     setRqRecallSet(new Set());
     clearAllRqStepTracking();
@@ -1448,14 +1442,14 @@ export default function App() {
         ) : (
           <span>今回の正答率 —</span>
         )}
-        <button onClick={() => {
-          if (!confirm("学習履歴をすべて削除しますか？")) return;
-          localStorage.removeItem("architect_quiz_history");
-          setHistory({});
-        }} style={{
-          padding: "2px 8px", borderRadius: 6, border: "1.5px solid #e5e7eb",
-          background: "#fff", color: "#9ca3af", fontSize: 11, cursor: "pointer",
-        }}>
+        <button
+          type="button"
+          onClick={handleClearAllHistory}
+          style={{
+            padding: "2px 8px", borderRadius: 6, border: "1.5px solid #e5e7eb",
+            background: "#fff", color: "#9ca3af", fontSize: 11, cursor: "pointer",
+          }}
+        >
           履歴クリア
         </button>
       </div>
@@ -1503,45 +1497,6 @@ export default function App() {
       {readQuestionFirst ? (
         <>
           <QuestionFigure url={q.図表URL} />
-          {readQuestionFirst && (
-            <div style={{
-              fontSize: 12, color: "#6b7280", marginBottom: 12, lineHeight: 1.65,
-              padding: "8px 12px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb",
-            }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                <span style={{ fontWeight: "bold", color: "#374151" }}>各記述の累計（解答回数・正答率）</span>
-                <button
-                  type="button"
-                  onClick={handleResetAllRqStepStats}
-                  disabled={!hasAnyRqStepStats}
-                  title="全問題の各記述累計を一斉にリセット"
-                  style={{
-                    padding: "2px 10px", borderRadius: 6, fontSize: 11, cursor: hasAnyRqStepStats ? "pointer" : "not-allowed",
-                    border: "1.5px solid #e5e7eb", background: "#fff",
-                    color: hasAnyRqStepStats ? "#6b7280" : "#d1d5db",
-                  }}
-                >
-                  全リセット
-                </button>
-              </div>
-              <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: "6px 14px" }}>
-                {[0, 1, 2, 3].map((si) => {
-                  const row = rqStepStats[histKey];
-                  const cell = row?.[si];
-                  const n = cell?.attempts ?? 0;
-                  const p = n ? Math.round((cell.correctCount / n) * 100) : null;
-                  const label = ["（１）", "（２）", "（３）", "（４）"][si];
-                  const cur = readQuestionFirst && si === stepIdx;
-                  return (
-                    <span key={si} style={{ whiteSpace: "nowrap", fontWeight: cur ? "bold" : "normal", color: cur ? "#111827" : undefined }}>
-                      {label}
-                      {n ? ` ${n}回・${p}%` : " —"}
-                    </span>
-                  );
-                })}
-              </div>
-            </div>
-          )}
           {!rqReview && (
             <div style={{ marginBottom: 20 }}>
               <div style={{
@@ -1699,6 +1654,40 @@ export default function App() {
           {readQuestionFirst && rqReview && (
             <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 10 }}>
               正解として選ぶべき肢は <strong>{officialAnswerLabel}</strong> 番です。各設問の解説は Notion 登録内容の該当箇所を上で表示済みです。
+            </div>
+          )}
+          {readQuestionFirst && rqReview && (
+            <div style={{
+              fontSize: 12, color: "#6b7280", marginBottom: 10, lineHeight: 1.65,
+              padding: "8px 12px", background: "rgba(255,255,255,0.6)", borderRadius: 8,
+              border: "1px solid #e5e7eb",
+            }}>
+              <div style={{ fontWeight: "bold", color: "#374151", marginBottom: 6 }}>
+                各記述の累計（解答回数・正答率）
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px" }}>
+                {[0, 1, 2, 3].map((si) => {
+                  const row = rqStepStats[histKey];
+                  const cell = row?.[si];
+                  const n = cell?.attempts ?? 0;
+                  const p = n ? Math.round((cell.correctCount / n) * 100) : null;
+                  const label = ["（１）", "（２）", "（３）", "（４）"][si];
+                  const judgmentOk = rqMarks[si] === officialSeiExpected(si);
+                  return (
+                    <span
+                      key={si}
+                      style={{
+                        whiteSpace: "nowrap",
+                        fontWeight: rqMarks[si] !== null ? "bold" : "normal",
+                        color: rqMarks[si] !== null ? (judgmentOk ? "#15803d" : "#dc2626") : undefined,
+                      }}
+                    >
+                      {label}
+                      {n ? ` ${n}回・${p}%` : " —"}
+                    </span>
+                  );
+                })}
+              </div>
             </div>
           )}
           {/* この問題の累計成績（今回分を含む） */}
