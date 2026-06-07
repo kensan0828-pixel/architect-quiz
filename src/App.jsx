@@ -1012,6 +1012,16 @@ export default function App() {
     ? flatAnsSlice.filter((a) => a?.correct).length
     : sessionAnswers.filter((a) => a?.correct).length;
   const hasAnyRqStepStats = readQuestionFirst && hasAnyRqStepData(rqStepStats);
+  const isQuizInProgress =
+    answeredInSession > 0
+    || currentIndex > 0
+    || (isRqFlatWeak && rqFlatIndex > 0)
+    || showResult
+    || (readQuestionFirst && (
+      rqReview
+      || rqMarks.some((m) => m !== null)
+      || rqItemExpl !== null
+    ));
 
   function handleSelect(index) {
     if (showResult) return;
@@ -1293,15 +1303,18 @@ export default function App() {
 
   return (
     <div style={{ maxWidth: 680, margin: "0 auto", padding: "24px 16px", fontFamily: "sans-serif" }}>
-      <h1 style={{ fontSize: 20, fontWeight: "bold", marginBottom: 16 }}>建築士試験 問題アプリ</h1>
-
-      <FilterBar subjects={subjects} years={years} filterSubject={filterSubject} filterYear={filterYear}
-        onSubjectChange={handleSubjectChange} onYearChange={handleYearChange}
-        onHelpClick={() => setShowQuizHelp(true)} />
       <QuizHelpModal open={showQuizHelp} onClose={() => setShowQuizHelp(false)} />
 
-      <div style={{ marginBottom: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <button onClick={handleShuffle} style={{
+      {!isQuizInProgress ? (
+        <>
+          <h1 style={{ fontSize: 20, fontWeight: "bold", marginBottom: 16 }}>建築士試験 問題アプリ</h1>
+
+          <FilterBar subjects={subjects} years={years} filterSubject={filterSubject} filterYear={filterYear}
+            onSubjectChange={handleSubjectChange} onYearChange={handleYearChange}
+            onHelpClick={() => setShowQuizHelp(true)} />
+
+          <div style={{ marginBottom: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button onClick={handleShuffle} style={{
           padding: "6px 14px", borderRadius: 8, border: "1.5px solid #6366f1",
           background: shuffledOrder ? "#6366f1" : "#fff",
           color: shuffledOrder ? "#fff" : "#6366f1",
@@ -1395,7 +1408,39 @@ export default function App() {
             順番通りに戻す
           </button>
         )}
-      </div>
+          </div>
+        </>
+      ) : (
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+          {readQuestionFirst && !sessionComplete && (
+            <button
+              type="button"
+              onClick={() => {
+                if (!confirm("一問一答を中断し、保存しますか？（ツールバーの「再開」で続きから再開できます）")) return;
+                saveRqInterrupt();
+              }}
+              style={{
+                padding: "6px 14px", borderRadius: 8, border: "1.5px solid #7c3aed",
+                background: "#fff", color: "#5b21b6",
+                fontSize: 14, cursor: "pointer", fontWeight: "bold",
+              }}
+            >
+              中断
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setShowQuizHelp(true)}
+            title="ヘルプ"
+            style={{
+              padding: "6px 12px", borderRadius: 8, border: "1.5px solid #e5e7eb",
+              background: "#fff", color: "#6b7280", fontSize: 14, cursor: "pointer", fontWeight: "bold",
+            }}
+          >
+            ？
+          </button>
+        </div>
+      )}
       {/* セッション内進捗 */}
       <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
         {answeredInSession > 0 ? (
