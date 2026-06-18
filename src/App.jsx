@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import Dashboard from "./components/Dashboard";
 import MockExam from "./components/MockExam";
-import { questionHistKey } from "./utils";
+import { questionHistKey, extractHokiArticleRefs, lawEgovUrl } from "./utils";
 
 // **text** をインライン <strong> にレンダリングするヘルパー
 function renderWithBold(text) {
@@ -45,6 +45,8 @@ const LS_RQ_RECALL = "architect_quiz_rq_recall";
 const LS_RQ_WRONG_STREAK = "architect_quiz_rq_wrong_streak";
 const LS_MCQ_RECALL = "architect_quiz_mcq_recall";
 const LS_MCQ_WRONG_STREAK = "architect_quiz_mcq_wrong_streak";
+const LS_RQ_SHOW_ARTICLES = "architect_quiz_rq_show_articles";
+const HOKI_SUBJECT = "学科Ⅲ（法規）";
 /** 一問一答×苦手順：この回数以上かつ正答率以上なら出題除外 */
 const RQ_MASTERED_MIN_ATTEMPTS = 7;
 const RQ_MASTERED_RATE = 0.85;
@@ -344,6 +346,48 @@ function QuestionFigure({ url }) {
   );
 }
 
+function RqHokiArticleBlock({ text }) {
+  const refs = useMemo(() => extractHokiArticleRefs(text), [text]);
+  if (refs.length === 0) {
+    return (
+      <div style={{
+        marginBottom: 10, padding: "10px 12px", borderRadius: 8,
+        background: "#f0f9ff", border: "1px solid #bae6fd",
+        fontSize: 12, color: "#64748b", textAlign: "left",
+      }}>
+        解説から条文番号を抽出できませんでした。
+      </div>
+    );
+  }
+  return (
+    <div style={{
+      marginBottom: 10, padding: "10px 12px", borderRadius: 8,
+      background: "#f0f9ff", border: "1px solid #bae6fd", textAlign: "left",
+    }}>
+      <div style={{ fontSize: 12, fontWeight: "bold", color: "#0891b2", marginBottom: 8 }}>
+        📖 解説に記載の条文
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {refs.map((r, i) => {
+          const url = lawEgovUrl(r.label);
+          return (
+            <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 13, color: "#1e293b", fontWeight: "bold" }}>{r.label}</span>
+              {url && (
+                <a href={url} target="_blank" rel="noopener noreferrer" style={{
+                  fontSize: 11, color: "#0891b2", textDecoration: "underline",
+                }}>
+                  e-Gov 🔗
+                </a>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function HintBlock({ q, articleLinks, setArticleLinks, loadingArticles, setLoadingArticles }) {
   const cfg = HINT_CONFIG[q.科目];
   if (!cfg) return null;
@@ -476,6 +520,11 @@ export default function App() {
   const [loadingArticles, setLoadingArticles] = useState(false);
   /** 一問一答：各選択肢を設問とみなし〇×で判断 */
   const [readQuestionFirst, setReadQuestionFirst] = useState(false);
+  /** 一問一答×法規：解説から条文番号を抽出して表示 */
+  const [rqShowArticles, setRqShowArticles] = useState(() => {
+    try { return localStorage.getItem(LS_RQ_SHOW_ARTICLES) === "1"; }
+    catch { return false; }
+  });
   const [rqStep, setRqStep] = useState(0);
   const [rqMarks, setRqMarks] = useState([null, null, null, null]);
   const [rqItemExpl, setRqItemExpl] = useState(null);
@@ -657,6 +706,7 @@ export default function App() {
     setRqItemExpl(d.rqItemExpl ?? null);
     setRqReview(!!d.rqReview);
     setRqExplList(Array.isArray(d.rqExplList) && d.rqExplList.length === 4 ? d.rqExplList : emptyRqExplList());
+    setRqShowArticles(!!d.rqShowArticles);
     setShowResult(!!d.showResult);
     setSelected(d.selected === undefined || d.selected === null ? null : d.selected);
     setSessionAnswers(padAnswers(d.sessionAnswers));
@@ -1265,6 +1315,7 @@ export default function App() {
       selected,
       sessionAnswers,
       rqExplList,
+      rqShowArticles,
     };
     try {
       localStorage.setItem(LS_RQ_INTERRUPT, JSON.stringify(payload));
@@ -1351,6 +1402,26 @@ export default function App() {
         >
           📝 一問一答{readQuestionFirst ? "（ON）" : ""}
         </button>
+        {readQuestionFirst && (
+          <button
+            type="button"
+            onClick={() => {
+              const next = !rqShowArticles;
+              setRqShowArticles(next);
+              try { localStorage.setItem(LS_RQ_SHOW_ARTICLES, next ? "1" : "0"); }
+              catch { /* ignore */ }
+            }}
+            title="学科Ⅲ（法規）の一問一答で、解説に記載の条文番号を表示します"
+            style={{
+              padding: "6px 14px", borderRadius: 8, border: "1.5px solid #0891b2",
+              background: rqShowArticles ? "#0891b2" : "#fff",
+              color: rqShowArticles ? "#fff" : "#0891b2",
+              fontSize: 14, cursor: "pointer", fontWeight: "bold",
+            }}
+          >
+            📖 条文番号{rqShowArticles ? "（ON）" : ""}
+          </button>
+        )}
         {readQuestionFirst && !sessionComplete && (
           <button
             type="button"
@@ -1406,6 +1477,25 @@ export default function App() {
         </>
       ) : (
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+          {readQuestionFirst && (
+            <button
+              type="button"
+              onClick={() => {
+                const next = !rqShowArticles;
+                setRqShowArticles(next);
+                try { localStorage.setItem(LS_RQ_SHOW_ARTICLES, next ? "1" : "0"); }
+                catch { /* ignore */ }
+              }}
+              style={{
+                padding: "6px 14px", borderRadius: 8, border: "1.5px solid #0891b2",
+                background: rqShowArticles ? "#0891b2" : "#fff",
+                color: rqShowArticles ? "#fff" : "#0891b2",
+                fontSize: 14, cursor: "pointer", fontWeight: "bold",
+              }}
+            >
+              📖 条文番号{rqShowArticles ? "（ON）" : ""}
+            </button>
+          )}
           {readQuestionFirst && !sessionComplete && (
             <button
               type="button"
@@ -1562,6 +1652,9 @@ export default function App() {
                     border: "1px solid #e5e7eb", fontSize: 14, color: "#374151", lineHeight: 1.75, whiteSpace: "pre-wrap",
                     textAlign: "left", width: "100%", boxSizing: "border-box",
                   }}>
+                    {rqShowArticles && q.科目 === HOKI_SUBJECT && (
+                      <RqHokiArticleBlock text={rqItemExpl} />
+                    )}
                     {renderWithBold(rqItemExpl)}
                   </div>
                 </div>
@@ -1863,6 +1956,13 @@ function QuizHelpModal({ open, onClose }) {
           <div style={headingStyle}>Notion解説の表示</div>
           <p style={{ margin: 0 }}>
             各記述に「正」「誤」を選ぶと、Notion に登録された解説のうち<strong>その記述に対応する箇所のみ</strong>が表示されます（見出しは表示しません）。
+          </p>
+        </section>
+
+        <section style={sectionStyle}>
+          <div style={headingStyle}>条文番号表示（学科Ⅲ・法規）</div>
+          <p style={{ margin: 0 }}>
+            一問一答ON時に<strong>「📖 条文番号」</strong>をONにすると、法規問題の解説表示時に<strong>解説テキストから抽出した条文番号</strong>を上部に表示します（e-Govリンク付き）。設定はブラウザに保存されます。
           </p>
         </section>
 
