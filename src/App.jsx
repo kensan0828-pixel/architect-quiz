@@ -346,7 +346,7 @@ function QuestionFigure({ url }) {
   );
 }
 
-function RqHokiArticleBlock({ text }) {
+function RqHokiArticleBlock({ text, hint = false }) {
   const refs = useMemo(() => extractHokiArticleRefs(text), [text]);
   if (refs.length === 0) {
     return (
@@ -355,7 +355,7 @@ function RqHokiArticleBlock({ text }) {
         background: "#f0f9ff", border: "1px solid #bae6fd",
         fontSize: 12, color: "#64748b", textAlign: "left",
       }}>
-        解説から条文番号を抽出できませんでした。
+        {hint ? "この記述の解説から条文番号を抽出できませんでした。" : "解説から条文番号を抽出できませんでした。"}
       </div>
     );
   }
@@ -365,7 +365,7 @@ function RqHokiArticleBlock({ text }) {
       background: "#f0f9ff", border: "1px solid #bae6fd", textAlign: "left",
     }}>
       <div style={{ fontSize: 12, fontWeight: "bold", color: "#0891b2", marginBottom: 8 }}>
-        📖 解説に記載の条文
+        {hint ? "📖 条文ヒント" : "📖 解説に記載の条文"}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {refs.map((r, i) => {
@@ -1040,6 +1040,7 @@ export default function App() {
   const officialAnswerLabel = officialNums.join("・") || q.正答;
   const officialSeiExpected = (i) => getOfficialSeiExpectedForQuestion(q, i);
   const stepIdx = isRqFlatWeak ? qFlat.step : rqStep;
+  const rqStepKaisetsu = extractKaisetsuForChoice(q.解説 || "", stepIdx + 1) || "";
   const rqFeedbackOk = !rqReview && rqItemExpl ? rqMarks[stepIdx] === officialSeiExpected(stepIdx) : null;
   const isCorrect = readQuestionFirst && rqReview
     ? [0, 1, 2, 3].every((i) => rqMarks[i] === officialSeiExpected(i))
@@ -1411,7 +1412,7 @@ export default function App() {
               try { localStorage.setItem(LS_RQ_SHOW_ARTICLES, next ? "1" : "0"); }
               catch { /* ignore */ }
             }}
-            title="学科Ⅲ（法規）の一問一答で、解説に記載の条文番号を表示します"
+            title="学科Ⅲ（法規）の一問一答で、出題時に条文番号をヒント表示します"
             style={{
               padding: "6px 14px", borderRadius: 8, border: "1.5px solid #0891b2",
               background: rqShowArticles ? "#0891b2" : "#fff",
@@ -1601,6 +1602,9 @@ export default function App() {
               }}>
                 <span>{choices[stepIdx]}</span>
               </div>
+              {rqShowArticles && q.科目 === HOKI_SUBJECT && rqItemExpl === null && (
+                <RqHokiArticleBlock text={rqStepKaisetsu} hint />
+              )}
               <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
                 <button
                   type="button"
@@ -1652,9 +1656,6 @@ export default function App() {
                     border: "1px solid #e5e7eb", fontSize: 14, color: "#374151", lineHeight: 1.75, whiteSpace: "pre-wrap",
                     textAlign: "left", width: "100%", boxSizing: "border-box",
                   }}>
-                    {rqShowArticles && q.科目 === HOKI_SUBJECT && (
-                      <RqHokiArticleBlock text={rqItemExpl} />
-                    )}
                     {renderWithBold(rqItemExpl)}
                   </div>
                 </div>
@@ -1962,7 +1963,7 @@ function QuizHelpModal({ open, onClose }) {
         <section style={sectionStyle}>
           <div style={headingStyle}>条文番号表示（学科Ⅲ・法規）</div>
           <p style={{ margin: 0 }}>
-            一問一答ON時に<strong>「📖 条文番号」</strong>をONにすると、法規問題の解説表示時に<strong>解説テキストから抽出した条文番号</strong>を上部に表示します（e-Govリンク付き）。設定はブラウザに保存されます。
+            一問一答ON時に<strong>「📖 条文番号」</strong>をONにすると、法規問題の各記述を出題した時点で<strong>解説テキストから抽出した条文番号</strong>がヒントとして表示されます（e-Govリンク付き）。解答後は従来どおり解説全文が表示されます。設定はブラウザに保存されます。
           </p>
         </section>
 
