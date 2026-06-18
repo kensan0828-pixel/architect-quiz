@@ -90,7 +90,95 @@ export function extractHokiArticleRefs(text) {
     pushHokiRef(seen, out, "建築基準法" + m[0].replace(/^同法/, ""));
   }
 
+  // 【法第56条第1項…】形式
+  for (const m of t.matchAll(/【([^】]*(?:法|令|規則|第[0-9]+条)[^】]*)】/g)) {
+    const inner = m[1];
+    for (const sub of inner.matchAll(new RegExp(`(?:${escaped}|法|令|規則)${HOKI_ARTICLE_SUFFIX}`, "g"))) {
+      let label = sub[0];
+      if (/^法第/.test(label)) label = "建築基準法" + label.slice(1);
+      else if (/^令第/.test(label)) label = "建築基準法施行令" + label.slice(1);
+      else if (/^規則第/.test(label)) label = "建築基準法施行規則" + label.slice(1);
+      pushHokiRef(seen, out, label);
+    }
+  }
+
   return out;
+}
+
+const KATA_CHOICE = { 1: "イ", 2: "ロ", 3: "ハ", 4: "ニ" };
+
+/** 選択肢番号 n（1〜4）の解説区切り位置を検索する正規表現一覧 */
+function kaisetsuMarkerPatterns(n) {
+  const wn = ["１", "２", "３", "４"][n - 1];
+  const an = String(n);
+  const kata = KATA_CHOICE[n];
+  const patterns = [
+    new RegExp(`(?:^|\\n)\\s*（\\s*${wn}\\s*）`, "gm"),
+    new RegExp(`(?:^|\\n)\\s*\\(\\s*${an}\\s*\\)`, "gm"),
+    new RegExp(`(?:^|\\n)\\s*${wn}\\s*[．.]`, "gm"),
+    new RegExp(`(?:^|\\n)\\s*${an}\\s*[．.]`, "gm"),
+    new RegExp(`(?:^|\\n)\\s*【\\s*${wn}\\s*】`, "gm"),
+    new RegExp(`(?:^|\\n)\\s*【\\s*${an}\\s*】`, "gm"),
+    new RegExp(`(?:^|\\n|\\s)${kata}\\s*[．.]`, "gm"),
+    new RegExp(`(?:^|\\n|\\s)(?:選択肢|解答|解説|設問)\\s*${wn}`, "gm"),
+    new RegExp(`(?:^|\\n|\\s)(?:選択肢|解答|解説|設問)\\s*${an}`, "gm"),
+  ];
+  // 1番目は行頭、2〜4番目は同一行内「 2. 」形式にも対応
+  if (n === 1) {
+    patterns.unshift(new RegExp(`^\\s*${an}\\s*[．.]`, "m"));
+  } else {
+    patterns.unshift(new RegExp(`(?<=\\s)${an}\\s*[．.]`, "gm"));
+  }
+  return patterns;
+}
+
+function findKaisetsuBoundaries(t) {
+  const byNum = {};
+  for (let n = 1; n <= 4; n++) {
+    for (const re of kaisetsuMarkerPatterns(n)) {
+      re.lastIndex = 0;
+      let m;
+      while ((m = re.exec(t)) !== null) {
+        const idx = m.index;
+        if (byNum[n] === undefined || idx < byNum[n]) byNum[n] = idx;
+      }
+    }
+  }
+  return byNum;
+}
+
+/**
+ * Notion「解説」全文から、choiceIndex（1〜4）に対応する段落を切り出す。
+ * （１）形式・1. / 1．・同一行内の 2. ・イ. 形式などに対応。
+ */
+export function extractKaisetsuForChoice(full, choiceIndex) {
+  if (!full || !String(full).trim()) return null;
+  const t = String(full);
+  const n = choiceIndex;
+  if (n < 1 || n > 4) return null;
+
+  const bounds = findKaisetsuBoundaries(t);
+  const start = bounds[n];
+  if (start === undefined) return null;
+
+  let end = t.length;
+  for (let next = n + 1; next <= 4; next++) {
+    if (bounds[next] !== undefined) {
+      end = bounds[next];
+      break;
+    }
+  }
+  const slice = t.slice(start, end).trim();
+  return slice || null;
+}
+
+/** 記述別切り出し。失敗時は解説全文をフォールバックとして返す */
+export function resolveKaisetsuForChoice(full, choiceIndex) {
+  const perChoice = extractKaisetsuForChoice(full, choiceIndex);
+  if (perChoice) return { text: perChoice, fallback: false };
+  const trimmed = (full || "").trim();
+  if (trimmed) return { text: trimmed, fallback: true };
+  return { text: "", fallback: false };
 }
 
 export function lawEgovUrl(label) {

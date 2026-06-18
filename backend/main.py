@@ -60,7 +60,8 @@ def get_questions():
         def get_text(key):
             val = props.get(key, {})
             rich = val.get("rich_text", [])
-            return rich[0]["plain_text"] if rich else ""
+            # Notion rich_text は1ブロック2000字上限のため、解説等は複数ブロックに分割される
+            return "".join(block.get("plain_text", "") for block in rich)
 
         def get_select(key):
             val = props.get(key, {})
@@ -120,6 +121,13 @@ def register_questions(questions: list = Body(...)):
 
         # ── 新規登録
         title = f"{year}-{subject}-No.{num}"
+
+        def rich_text_chunks(text):
+            content = text or ""
+            if not content:
+                return [{"text": {"content": ""}}]
+            return [{"text": {"content": content[i:i + 2000]}} for i in range(0, len(content), 2000)]
+
         page = {
             "parent": {"database_id": DATABASE_ID},
             "properties": {
@@ -127,14 +135,14 @@ def register_questions(questions: list = Body(...)):
                 "問題番号": {"number": int(num) if num else None},
                 "科目":    {"select": {"name": subject}},
                 "年度":    {"select": {"name": year}},
-                "問題文":  {"rich_text": [{"text": {"content": q.get("問題文", "")}}]},
-                "選択肢1": {"rich_text": [{"text": {"content": q.get("選択肢1", "")}}]},
-                "選択肢2": {"rich_text": [{"text": {"content": q.get("選択肢2", "")}}]},
-                "選択肢3": {"rich_text": [{"text": {"content": q.get("選択肢3", "")}}]},
-                "選択肢4": {"rich_text": [{"text": {"content": q.get("選択肢4", "")}}]},
+                "問題文":  {"rich_text": rich_text_chunks(q.get("問題文", ""))},
+                "選択肢1": {"rich_text": rich_text_chunks(q.get("選択肢1", ""))},
+                "選択肢2": {"rich_text": rich_text_chunks(q.get("選択肢2", ""))},
+                "選択肢3": {"rich_text": rich_text_chunks(q.get("選択肢3", ""))},
+                "選択肢4": {"rich_text": rich_text_chunks(q.get("選択肢4", ""))},
                 "正答":    {"select": {"name": str(q.get("正答", ""))}},
-                "解説":    {"rich_text": [{"text": {"content": q.get("解説", "")}}]},
-                "図表URL": {"rich_text": [{"text": {"content": q.get("図表URL", "")}}]},
+                "解説":    {"rich_text": rich_text_chunks(q.get("解説", ""))},
+                "図表URL": {"rich_text": rich_text_chunks(q.get("図表URL", ""))},
             }
         }
         res = httpx.post(
@@ -537,8 +545,10 @@ def update_question(page_id: str, body: dict = Body(...)):
         if not t:
             continue
         if t == "rich_text":
+            content = value or ""
+            chunks = [content[i:i + 2000] for i in range(0, max(len(content), 1), 2000)] if content else [""]
             properties[field] = {
-                "rich_text": [{"text": {"content": value or ""}}]
+                "rich_text": [{"text": {"content": chunk}} for chunk in chunks]
             }
         elif t == "select":
             properties[field] = {

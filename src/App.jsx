@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import Dashboard from "./components/Dashboard";
 import MockExam from "./components/MockExam";
-import { questionHistKey, extractHokiArticleRefs, lawEgovUrl } from "./utils";
+import { questionHistKey, extractHokiArticleRefs, resolveKaisetsuForChoice, lawEgovUrl } from "./utils";
 
 // **text** をインライン <strong> にレンダリングするヘルパー
 function renderWithBold(text) {
@@ -276,53 +276,6 @@ function buildRqStepWeakFlatOrder(baseQuestionList, rqStepStats, defaultSortFn, 
   });
 }
 
-/**
- * Notion「解説」全文から、choiceIndex（1〜4）に対応する段落を切り出す。
- */
-function findKaisetsuSectionStart(t, choiceNum, fromIdx) {
-  if (choiceNum < 1 || choiceNum > 4) return -1;
-  const wn = ["１", "２", "３", "４"][choiceNum - 1];
-  const an = String(choiceNum);
-  const patterns = [
-    new RegExp(`(?:^|\\n)\\s*（\\s*${wn}\\s*）`, "gm"),
-    new RegExp(`(?:^|\\n)\\s*\\(\\s*${an}\\s*\\)`, "gm"),
-    new RegExp(`(?:^|\\n)\\s*${wn}\\s*[．.]`, "gm"),
-    new RegExp(`(?:^|\\n)\\s*${an}\\s*[\\.．]`, "gm"),
-    new RegExp(`(?:^|\\n)\\s*【\\s*${wn}\\s*】`, "gm"),
-    new RegExp(`(?:^|\\n)\\s*【\\s*${an}\\s*】`, "gm"),
-    new RegExp(`(?:^|\\n)\\s*(?:選択肢|解答|解説|設問)\\s*${wn}`, "gm"),
-    new RegExp(`(?:^|\\n)\\s*(?:選択肢|解答|解説|設問)\\s*${an}`, "gm"),
-  ];
-  let best = -1;
-  for (const re of patterns) {
-    re.lastIndex = 0;
-    let m;
-    while ((m = re.exec(t)) !== null) {
-      if (m.index >= fromIdx && (best < 0 || m.index < best)) best = m.index;
-    }
-  }
-  return best;
-}
-
-function extractKaisetsuForChoice(full, choiceIndex) {
-  if (!full || !String(full).trim()) return null;
-  const t = String(full);
-  const n = choiceIndex;
-  if (n < 1 || n > 4) return null;
-  const start = findKaisetsuSectionStart(t, n, 0);
-  if (start < 0) return null;
-  let end = t.length;
-  for (let next = n + 1; next <= 4; next++) {
-    const ns = findKaisetsuSectionStart(t, next, start + 1);
-    if (ns >= 0) {
-      end = ns;
-      break;
-    }
-  }
-  const slice = t.slice(start, end).trim();
-  return slice || null;
-}
-
 const HINT_CONFIG = {
   "学科Ⅰ（計画）":      { icon: "💡", label: "用語・基準を確認",   color: "#7c3aed", bg: "#f5f3ff", border: "#ddd6fe", heading: "💡 用語・基準（ヒント）" },
   "学科Ⅱ（環境・設備）": { icon: "💡", label: "公式・基準を確認",   color: "#9d174d", bg: "#fdf4ff", border: "#f5d0fe", heading: "💡 公式・基準（ヒント）" },
@@ -346,7 +299,7 @@ function QuestionFigure({ url }) {
   );
 }
 
-function RqHokiArticleBlock({ text, hint = false }) {
+function RqHokiArticleBlock({ text, hint = false, articleFallback = false }) {
   const refs = useMemo(() => extractHokiArticleRefs(text), [text]);
   if (refs.length === 0) {
     return (
@@ -355,7 +308,11 @@ function RqHokiArticleBlock({ text, hint = false }) {
         background: "#f0f9ff", border: "1px solid #bae6fd",
         fontSize: 12, color: "#64748b", textAlign: "left",
       }}>
-        {hint ? "この記述の解説から条文番号を抽出できませんでした。" : "解説から条文番号を抽出できませんでした。"}
+        {!text?.trim()
+          ? "Notionに解説が登録されていません。"
+          : hint
+            ? "この記述の解説から条文番号を抽出できませんでした。"
+            : "解説から条文番号を抽出できませんでした。"}
       </div>
     );
   }
@@ -366,6 +323,11 @@ function RqHokiArticleBlock({ text, hint = false }) {
     }}>
       <div style={{ fontSize: 12, fontWeight: "bold", color: "#0891b2", marginBottom: 8 }}>
         {hint ? "📖 条文ヒント" : "📖 解説に記載の条文"}
+        {articleFallback && (
+          <span style={{ fontWeight: "normal", color: "#64748b", marginLeft: 6 }}>
+            （記述別切り出し不可・問題全体から抽出）
+          </span>
+        )}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {refs.map((r, i) => {
@@ -1040,7 +1002,7 @@ export default function App() {
   const officialAnswerLabel = officialNums.join("・") || q.正答;
   const officialSeiExpected = (i) => getOfficialSeiExpectedForQuestion(q, i);
   const stepIdx = isRqFlatWeak ? qFlat.step : rqStep;
-  const rqStepKaisetsu = extractKaisetsuForChoice(q.解説 || "", stepIdx + 1) || "";
+  const rqKaisetsuResolved = resolveKaisetsuForChoice(q.解説 || "", stepIdx + 1);
   const rqFeedbackOk = !rqReview && rqItemExpl ? rqMarks[stepIdx] === officialSeiExpected(stepIdx) : null;
   const isCorrect = readQuestionFirst && rqReview
     ? [0, 1, 2, 3].every((i) => rqMarks[i] === officialSeiExpected(i))
@@ -1203,13 +1165,14 @@ export default function App() {
       saveRqWrongStreaks(streaks);
     }
 
-    const extracted = extractKaisetsuForChoice(q.解説 || "", idx + 1);
-    const text = extracted
-      || "（Notionの解説から、この選択肢に対応する段落を自動では切り出せませんでした。解説の体裁が（１）（２）形式などの場合に認識しやすくなります。）";
-    setRqItemExpl(text);
+    const { text, fallback } = resolveKaisetsuForChoice(q.解説 || "", idx + 1);
+    const display = text
+      ? (fallback ? `（記述別の切り出しに失敗したため、解説全文を表示しています）\n\n${text}` : text)
+      : "（Notionに解説が登録されていないか、読み取れませんでした。）";
+    setRqItemExpl(display);
     setRqExplList((prev) => {
       const n = [...prev];
-      n[idx] = text;
+      n[idx] = display;
       return n;
     });
   }
@@ -1603,7 +1566,11 @@ export default function App() {
                 <span>{choices[stepIdx]}</span>
               </div>
               {rqShowArticles && q.科目 === HOKI_SUBJECT && rqItemExpl === null && (
-                <RqHokiArticleBlock text={rqStepKaisetsu} hint />
+                <RqHokiArticleBlock
+                  text={rqKaisetsuResolved.text}
+                  hint
+                  articleFallback={rqKaisetsuResolved.fallback}
+                />
               )}
               <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
                 <button
