@@ -299,7 +299,7 @@ function QuestionFigure({ url }) {
   );
 }
 
-function RqHokiArticleBlock({ text, hint = false, articleFallback = false }) {
+function RqHokiArticleBlock({ text, hint = false, articleFallback = false, hasFullKaisetsu = false }) {
   const refs = useMemo(() => extractHokiArticleRefs(text), [text]);
   if (refs.length === 0) {
     return (
@@ -309,7 +309,9 @@ function RqHokiArticleBlock({ text, hint = false, articleFallback = false }) {
         fontSize: 12, color: "#64748b", textAlign: "left",
       }}>
         {!text?.trim()
-          ? "Notionに解説が登録されていません。"
+          ? (hasFullKaisetsu
+            ? "この記述の解説がNotionに登録されていません。"
+            : "Notionに解説が登録されていません。")
           : hint
             ? "この記述の解説から条文番号を抽出できませんでした。"
             : "解説から条文番号を抽出できませんでした。"}
@@ -1019,9 +1021,12 @@ export default function App() {
   const officialAnswerLabel = officialNums.join("・") || q.正答;
   const officialSeiExpected = (i) => getOfficialSeiExpectedForQuestion(q, i);
   const stepIdx = isRqFlatWeak ? qFlat.step : rqStep;
+  const rqFullKaisetsu = (q.解説 || "").trim();
+  const rqChoiceKaisetsu = extractKaisetsuForChoice(rqFullKaisetsu, stepIdx + 1);
   const rqArticleHintText = (readQuestionFirst && rqShowArticles && q.科目 === HOKI_SUBJECT)
-    ? (extractKaisetsuForChoice(q.解説 || "", stepIdx + 1) || "")
+    ? (rqChoiceKaisetsu || rqFullKaisetsu)
     : "";
+  const rqArticleHintFallback = !rqChoiceKaisetsu && !!rqFullKaisetsu;
   const rqFeedbackOk = !rqReview && rqItemExpl ? rqMarks[stepIdx] === officialSeiExpected(stepIdx) : null;
   const isCorrect = readQuestionFirst && rqReview
     ? [0, 1, 2, 3].every((i) => rqMarks[i] === officialSeiExpected(i))
@@ -1586,7 +1591,12 @@ export default function App() {
                 <span>{choices[stepIdx]}</span>
               </div>
               {rqShowArticles && q.科目 === HOKI_SUBJECT && rqItemExpl === null && (
-                <RqHokiArticleBlock text={rqArticleHintText} hint />
+                <RqHokiArticleBlock
+                  text={rqArticleHintText}
+                  hint
+                  articleFallback={rqArticleHintFallback}
+                  hasFullKaisetsu={!!rqFullKaisetsu}
+                />
               )}
               <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
                 <button

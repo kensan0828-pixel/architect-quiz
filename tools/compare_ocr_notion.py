@@ -80,6 +80,13 @@ def similarity(a: str, b: str) -> float:
     return difflib.SequenceMatcher(None, na, nb).ratio()
 
 
+def count_choice_markers(text: str) -> int:
+    """解説内の記述区切り（1. 〜 4.）の数を数える"""
+    if not text:
+        return 0
+    return len(re.findall(r"(?:^|[\n\r\s])[1-4][\.．]", text.strip()))
+
+
 def _notion_key(year: str, subject: str, question_no: int) -> tuple[str, str, int]:
     return (year, subject, question_no)
 
@@ -247,16 +254,26 @@ def process_subject(
         )
 
         if fix and not dry_run:
-            try:
-                update_notion_explanation(page_id, ocr_text)
-                fixed_count += 1
-                item["fixed"] = True
-                print(f"         → Notion 更新完了")
-            except Exception as e:
-                item["fixed"] = False
-                item["error"] = str(e)
-                print(f"         → 更新失敗: {e}")
-            time.sleep(NOTION_INTERVAL_SEC)
+            ocr_markers = count_choice_markers(ocr_text)
+            notion_markers = count_choice_markers(notion_text)
+            if diff_preview == "notion_longer" and notion_markers > ocr_markers:
+                item["skipped"] = "notion_has_more_choice_paragraphs"
+                print(
+                    f"         → スキップ（Notion {notion_markers}記述 / OCR {ocr_markers}記述。"
+                    " OCR側が欠落している可能性）",
+                )
+                time.sleep(0)
+            else:
+                try:
+                    update_notion_explanation(page_id, ocr_text)
+                    fixed_count += 1
+                    item["fixed"] = True
+                    print(f"         → Notion 更新完了")
+                except Exception as e:
+                    item["fixed"] = False
+                    item["error"] = str(e)
+                    print(f"         → 更新失敗: {e}")
+                time.sleep(NOTION_INTERVAL_SEC)
 
     report[key]["summary"] = {
         "match": match_count,
