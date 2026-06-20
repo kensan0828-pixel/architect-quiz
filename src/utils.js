@@ -1,3 +1,5 @@
+import hokiLawIndexData from "./data/hoki_law_index.json";
+
 /** e-Gov 法令ID（法規ヒント・一問一答条文表示で共通） */
 export const LAW_EGOV = {
   "建築基準法": "325AC0000000201",
@@ -48,6 +50,130 @@ const HOKI_LAW_NAMES = [
 
 const HOKI_ARTICLE_SUFFIX = "第[0-9]+条(?:の[0-9]+)?(?:第[0-9]+項)?(?:第[0-9]+号)?";
 
+/** Excelインデックスの法令名（略称→正式名称） */
+const HOKI_LAW_ALIASES = {
+  "建築物省エネ法": "建築物エネルギー消費性能向上法",
+  "建築物のエネルギー消費性能の向上等に関する法律": "建築物エネルギー消費性能向上法",
+  "建築基準法施行規則": "建築基準法施行規則／指定資格検定機関等に関する省令",
+  "住宅品確法": "住宅品質確保促進法",
+  "長期優良住宅法": "長期優良住宅普及促進法",
+  "宅地造成等規制法": "宅地造成盛土規制法",
+};
+
+const HOKI_LAW_PREFIX = {
+  "建築基準法": "法",
+  "建築基準法施行令": "令",
+  "建築基準法施行規則／指定資格検定機関等に関する省令": "規",
+};
+
+function normalizeHokiLawName(name) {
+  if (!name) return "";
+  const n = zenNumToHan(name).trim();
+  return HOKI_LAW_ALIASES[n] || n;
+}
+
+function defaultHokiPrefix(law) {
+  return HOKI_LAW_PREFIX[normalizeHokiLawName(law)] || "法";
+}
+
+function parseExcelArticleToken(token, defaultPrefix) {
+  let t = zenNumToHan(token).replace(/\s+/g, "").replace(/～|〜$/g, "");
+  if (!t) return null;
+  let prefix = defaultPrefix;
+  const pm = t.match(/^(法|令|規|省令)/);
+  if (pm) {
+    prefix = pm[1];
+    t = t.slice(pm[1].length);
+  }
+  const m = t.match(/^(\d+)条(?:の(\d+))?/);
+  if (!m) return null;
+  return { prefix, base: parseInt(m[1], 10), no2: m[2] ? parseInt(m[2], 10) : null };
+}
+
+function parseExcelArticleField(law, field) {
+  if (!field) return [];
+  const defaultPrefix = defaultHokiPrefix(law);
+  const parts = field.split(/[、・，,]/).map((s) => s.trim()).filter(Boolean);
+  const specs = [];
+  let lastPrefix = defaultPrefix;
+  for (const part of parts) {
+    const tok = parseExcelArticleToken(part, lastPrefix);
+    if (!tok) continue;
+    lastPrefix = tok.prefix;
+    specs.push(tok);
+  }
+  return specs;
+}
+
+const HOKI_INDEX_ROWS = hokiLawIndexData.map((row) => ({
+  law: normalizeHokiLawName(row.law),
+  index: row.index,
+  specs: parseExcelArticleField(row.law, row.article),
+}));
+
+function articleSpecMatches(spec, base, no2) {
+  if (spec.base !== base) return false;
+  if (spec.no2 != null) return spec.no2 === no2;
+  return no2 == null;
+}
+
+/** 法令名＋条文番号からインデックス名を検索 */
+export function lookupHokiIndex(lawName, base, no2) {
+  if (!lawName || base == null) return null;
+  const law = normalizeHokiLawName(lawName);
+  let looseMatch = null;
+  for (const row of HOKI_INDEX_ROWS) {
+    if (row.law !== law || row.specs.length === 0) continue;
+    for (const spec of row.specs) {
+      if (!articleSpecMatches(spec, base, no2)) continue;
+      if (spec.no2 != null) return row.index;
+      if (!exactMatch) exactMatch = row.index;
+    }
+  }
+  return exactMatch;
+}
+
+export function parseLawArticleLabel(label) {
+  const normalized = zenNumToHan(label).replace(/\s+/g, "");
+  const lawCandidates = [
+    ...new Set([
+      ...HOKI_INDEX_ROWS.map((r) => r.law),
+      ...HOKI_LAW_NAMES.map(normalizeHokiLawName),
+      ...Object.keys(HOKI_LAW_ALIASES),
+    ]),
+  ].sort((a, b) => b.length - a.length);
+
+  let law = null;
+  for (const name of lawCandidates) {
+    const canon = normalizeHokiLawName(name);
+    if (normalized.startsWith(canon) || normalized.startsWith(name)) {
+      law = canon;
+      break;
+    }
+  }
+  if (!law) {
+    if (/^法第/.test(normalized)) law = "建築基準法";
+    else if (/^令第/.test(normalized)) law = "建築基準法施行令";
+    else if (/^規則第/.test(normalized)) {
+      law = "建築基準法施行規則／指定資格検定機関等に関する省令";
+    }
+  }
+
+  const m = normalized.match(/第(\d+)条(?:の(\d+))?(?:第(\d+)項)?(?:第(\d+)号)?/);
+  if (!m) return { law, base: null, no2: null };
+  return {
+    law,
+    base: parseInt(m[1], 10),
+    no2: m[2] ? parseInt(m[2], 10) : null,
+  };
+}
+
+function enrichHokiRef(label) {
+  const { law, base, no2 } = parseLawArticleLabel(label);
+  const index = lookupHokiIndex(law, base, no2);
+  return index ? { label, index } : { label };
+}
+
 function zenNumToHan(s) {
   return s.replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0));
 }
@@ -56,7 +182,7 @@ function pushHokiRef(seen, out, label) {
   const normalized = zenNumToHan(label).replace(/\s+/g, "");
   if (!normalized || seen.has(normalized)) return;
   seen.add(normalized);
-  out.push({ label: normalized });
+  out.push(enrichHokiRef(normalized));
 }
 
 /** Notion解説テキストから条文番号らしき表記を抽出（学科Ⅲ一問一答用） */

@@ -334,7 +334,18 @@ function RqHokiArticleBlock({ text, hint = false, articleFallback = false }) {
           const url = lawEgovUrl(r.label);
           return (
             <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-              <span style={{ fontSize: 13, color: "#1e293b", fontWeight: "bold" }}>{r.label}</span>
+              <span style={{
+                fontSize: 13, color: "#1e293b", fontWeight: "bold",
+              }}>
+                {r.label}
+                {r.index && (
+                  <span style={{
+                    fontWeight: "normal", color: "#0891b2", marginLeft: 6,
+                  }}>
+                    【{r.index}】
+                  </span>
+                )}
+              </span>
               {url && (
                 <a href={url} target="_blank" rel="noopener noreferrer" style={{
                   fontSize: 11, color: "#0891b2", textDecoration: "underline",
@@ -1930,7 +1941,7 @@ function QuizHelpModal({ open, onClose }) {
         <section style={sectionStyle}>
           <div style={headingStyle}>条文番号表示（学科Ⅲ・法規）</div>
           <p style={{ margin: 0 }}>
-            一問一答ON時に<strong>「📖 条文番号」</strong>をONにすると、法規問題の各記述を出題した時点で<strong>解説テキストから抽出した条文番号</strong>がヒントとして表示されます（e-Govリンク付き）。解答後は従来どおり解説全文が表示されます。設定はブラウザに保存されます。
+            一問一答ON時に<strong>「📖 条文番号」</strong>をONにすると、法規問題の各記述を出題した時点で<strong>解説テキストから抽出した条文番号</strong>がヒントとして表示されます（e-Govリンク付き）。法令名・条文番号が一致する場合は、添付インデックス表の<strong>インデックス名</strong>も条文の横に表示されます。解答後は従来どおり解説全文が表示されます。設定はブラウザに保存されます。
           </p>
         </section>
 
