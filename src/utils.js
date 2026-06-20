@@ -111,6 +111,14 @@ const HOKI_INDEX_ROWS = hokiLawIndexData.map((row) => ({
   specs: parseExcelArticleField(row.law, row.article),
 }));
 
+const LAW_CANDIDATES_SORTED = [
+  ...new Set([
+    ...HOKI_INDEX_ROWS.map((r) => r.law),
+    ...HOKI_LAW_NAMES.map(normalizeHokiLawName),
+    ...Object.keys(HOKI_LAW_ALIASES),
+  ]),
+].sort((a, b) => b.length - a.length);
+
 function articleSpecMatches(spec, base, no2) {
   if (spec.base !== base) return false;
   if (spec.no2 != null) return spec.no2 === no2;
@@ -121,7 +129,7 @@ function articleSpecMatches(spec, base, no2) {
 export function lookupHokiIndex(lawName, base, no2) {
   if (!lawName || base == null) return null;
   const law = normalizeHokiLawName(lawName);
-  let looseMatch = null;
+  let exactMatch = null;
   for (const row of HOKI_INDEX_ROWS) {
     if (row.law !== law || row.specs.length === 0) continue;
     for (const spec of row.specs) {
@@ -135,16 +143,9 @@ export function lookupHokiIndex(lawName, base, no2) {
 
 export function parseLawArticleLabel(label) {
   const normalized = zenNumToHan(label).replace(/\s+/g, "");
-  const lawCandidates = [
-    ...new Set([
-      ...HOKI_INDEX_ROWS.map((r) => r.law),
-      ...HOKI_LAW_NAMES.map(normalizeHokiLawName),
-      ...Object.keys(HOKI_LAW_ALIASES),
-    ]),
-  ].sort((a, b) => b.length - a.length);
 
   let law = null;
-  for (const name of lawCandidates) {
+  for (const name of LAW_CANDIDATES_SORTED) {
     const canon = normalizeHokiLawName(name);
     if (normalized.startsWith(canon) || normalized.startsWith(name)) {
       law = canon;
@@ -169,9 +170,13 @@ export function parseLawArticleLabel(label) {
 }
 
 function enrichHokiRef(label) {
-  const { law, base, no2 } = parseLawArticleLabel(label);
-  const index = lookupHokiIndex(law, base, no2);
-  return index ? { label, index } : { label };
+  try {
+    const { law, base, no2 } = parseLawArticleLabel(label);
+    const index = lookupHokiIndex(law, base, no2);
+    return index ? { label, index } : { label };
+  } catch {
+    return { label };
+  }
 }
 
 function zenNumToHan(s) {
@@ -188,16 +193,27 @@ function pushHokiRef(seen, out, label) {
 /** Notion解説テキストから条文番号らしき表記を抽出（学科Ⅲ一問一答用） */
 export function extractHokiArticleRefs(text) {
   if (!text || !String(text).trim()) return [];
-  const t = zenNumToHan(String(text));
+  // 記述1件分の解説を想定（全文フォールバック等の長文で固まらないよう上限）
+  const raw = String(text);
+  const t = zenNumToHan(raw.length > 2500 ? raw.slice(0, 2500) : raw);
   const seen = new Set();
   const out = [];
+  const MAX_REFS = 20;
+
+  const push = (label) => {
+    if (out.length >= MAX_REFS) return;
+    pushHokiRef(seen, out, label);
+  };
 
   const escaped = HOKI_LAW_NAMES.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
   const fullRe = new RegExp(`(?:${escaped})${HOKI_ARTICLE_SUFFIX}`, "g");
-  for (const m of t.matchAll(fullRe)) pushHokiRef(seen, out, m[0]);
+  for (const m of t.matchAll(fullRe)) push(m[0]);
 
-  for (const m of t.matchAll(new RegExp(`\\(([^)]*?${HOKI_ARTICLE_SUFFIX}[^)]*)\\)`, "g"))) {
-    pushHokiRef(seen, out, m[1]);
+  if (out.length < MAX_REFS && t.length <= 1500) {
+    for (const m of t.matchAll(new RegExp(`\\(([^)]{0,80}${HOKI_ARTICLE_SUFFIX}[^)]{0,40})\\)`, "g"))) {
+      push(m[1]);
+      if (out.length >= MAX_REFS) break;
+    }
   }
 
   const abbrev = [
@@ -206,91 +222,90 @@ export function extractHokiArticleRefs(text) {
     { re: /規則第[0-9]+条(?:の[0-9]+)?(?:第[0-9]+項)?(?:第[0-9]+号)?/g, prefix: "建築基準法施行規則" },
   ];
   for (const { re, prefix } of abbrev) {
-    for (const m of t.matchAll(re)) pushHokiRef(seen, out, prefix + m[0].slice(1));
+    if (out.length >= MAX_REFS) break;
+    for (const m of t.matchAll(re)) push(prefix + m[0].slice(1));
   }
 
-  for (const m of t.matchAll(new RegExp(`同法施行令${HOKI_ARTICLE_SUFFIX}`, "g"))) {
-    pushHokiRef(seen, out, "建築基準法施行令" + m[0].replace(/^同法施行令/, ""));
+  if (out.length < MAX_REFS) {
+    for (const m of t.matchAll(new RegExp(`同法施行令${HOKI_ARTICLE_SUFFIX}`, "g"))) {
+      push("建築基準法施行令" + m[0].replace(/^同法施行令/, ""));
+    }
   }
-  for (const m of t.matchAll(new RegExp(`同法${HOKI_ARTICLE_SUFFIX}`, "g"))) {
-    pushHokiRef(seen, out, "建築基準法" + m[0].replace(/^同法/, ""));
+  if (out.length < MAX_REFS) {
+    for (const m of t.matchAll(new RegExp(`同法${HOKI_ARTICLE_SUFFIX}`, "g"))) {
+      push("建築基準法" + m[0].replace(/^同法/, ""));
+    }
   }
 
   // 【法第56条第1項…】形式
-  for (const m of t.matchAll(/【([^】]*(?:法|令|規則|第[0-9]+条)[^】]*)】/g)) {
-    const inner = m[1];
-    for (const sub of inner.matchAll(new RegExp(`(?:${escaped}|法|令|規則)${HOKI_ARTICLE_SUFFIX}`, "g"))) {
-      let label = sub[0];
-      if (/^法第/.test(label)) label = "建築基準法" + label.slice(1);
-      else if (/^令第/.test(label)) label = "建築基準法施行令" + label.slice(1);
-      else if (/^規則第/.test(label)) label = "建築基準法施行規則" + label.slice(1);
-      pushHokiRef(seen, out, label);
+  if (out.length < MAX_REFS) {
+    for (const m of t.matchAll(/【([^】]{0,120})】/g)) {
+      const inner = m[1];
+      if (!/(?:法|令|規則|第[0-9]+条)/.test(inner)) continue;
+      for (const sub of inner.matchAll(new RegExp(`(?:${escaped}|法|令|規則)${HOKI_ARTICLE_SUFFIX}`, "g"))) {
+        let label = sub[0];
+        if (/^法第/.test(label)) label = "建築基準法" + label.slice(1);
+        else if (/^令第/.test(label)) label = "建築基準法施行令" + label.slice(1);
+        else if (/^規則第/.test(label)) label = "建築基準法施行規則" + label.slice(1);
+        push(label);
+        if (out.length >= MAX_REFS) break;
+      }
     }
   }
 
   return out;
 }
 
-const KATA_CHOICE = { 1: "イ", 2: "ロ", 3: "ハ", 4: "ニ" };
+const KATA_TO_NUM = { イ: 1, ロ: 2, ハ: 3, ニ: 4 };
 
-/** 選択肢番号 n（1〜4）の解説区切り位置を検索する正規表現一覧 */
-function kaisetsuMarkerPatterns(n) {
-  const wn = ["１", "２", "３", "４"][n - 1];
-  const an = String(n);
-  const kata = KATA_CHOICE[n];
-  const patterns = [
-    new RegExp(`(?:^|\\n)\\s*（\\s*${wn}\\s*）`, "gm"),
-    new RegExp(`(?:^|\\n)\\s*\\(\\s*${an}\\s*\\)`, "gm"),
-    new RegExp(`(?:^|\\n)\\s*${wn}\\s*[．.]`, "gm"),
-    new RegExp(`(?:^|\\n)\\s*${an}\\s*[．.]`, "gm"),
-    new RegExp(`(?:^|\\n)\\s*【\\s*${wn}\\s*】`, "gm"),
-    new RegExp(`(?:^|\\n)\\s*【\\s*${an}\\s*】`, "gm"),
-    new RegExp(`(?:^|\\n|\\s)${kata}\\s*[．.]`, "gm"),
-    new RegExp(`(?:^|\\n|\\s)(?:選択肢|解答|解説|設問)\\s*${wn}`, "gm"),
-    new RegExp(`(?:^|\\n|\\s)(?:選択肢|解答|解説|設問)\\s*${an}`, "gm"),
-  ];
-  // 1番目は行頭、2〜4番目は同一行内「 2. 」形式にも対応
-  if (n === 1) {
-    patterns.unshift(new RegExp(`^\\s*${an}\\s*[．.]`, "m"));
-  } else {
-    patterns.unshift(new RegExp(`(?<=\\s)${an}\\s*[．.]`, "gm"));
-  }
-  return patterns;
+function markerTokenToNum(token) {
+  if (!token) return 0;
+  if (KATA_TO_NUM[token]) return KATA_TO_NUM[token];
+  const d = zenNumToHan(token);
+  const n = parseInt(d, 10);
+  return n >= 1 && n <= 4 ? n : 0;
 }
 
-function findKaisetsuBoundaries(t) {
-  const byNum = {};
-  for (let n = 1; n <= 4; n++) {
-    for (const re of kaisetsuMarkerPatterns(n)) {
-      re.lastIndex = 0;
-      let m;
-      while ((m = re.exec(t)) !== null) {
-        const idx = m.index;
-        if (byNum[n] === undefined || idx < byNum[n]) byNum[n] = idx;
-      }
+/** 解説テキスト内の記述区切り（1. / （１） / イ. 等）を1パスで走査 */
+function scanChoiceMarkers(text) {
+  const t = text.length > 12000 ? text.slice(0, 12000) : text;
+  const markers = [];
+  const re = /(?:^|[\n\r\s])(?:（\s*([１-４])\s*）|\(\s*([1-4])\s*\)|([1-4１-４]|[イロハニ])[\.．])/g;
+  let m;
+  while ((m = re.exec(t)) !== null) {
+    const num = markerTokenToNum(m[1] || m[2] || m[3]);
+    if (num < 1 || num > 4) continue;
+    const lead = m[0].length - m[0].trimStart().length;
+    const index = m.index + lead;
+    if (markers.length === 0 || markers[markers.length - 1].index !== index) {
+      markers.push({ num, index });
     }
   }
-  return byNum;
+  const byNum = {};
+  for (const mk of markers) {
+    if (byNum[mk.num] === undefined || mk.index < byNum[mk.num]) {
+      byNum[mk.num] = mk.index;
+    }
+  }
+  return { text: t, byNum };
 }
 
 /**
  * Notion「解説」全文から、choiceIndex（1〜4）に対応する段落を切り出す。
- * （１）形式・1. / 1．・同一行内の 2. ・イ. 形式などに対応。
  */
 export function extractKaisetsuForChoice(full, choiceIndex) {
   if (!full || !String(full).trim()) return null;
-  const t = String(full);
   const n = choiceIndex;
   if (n < 1 || n > 4) return null;
 
-  const bounds = findKaisetsuBoundaries(t);
-  const start = bounds[n];
+  const { text: t, byNum } = scanChoiceMarkers(String(full));
+  const start = byNum[n];
   if (start === undefined) return null;
 
   let end = t.length;
   for (let next = n + 1; next <= 4; next++) {
-    if (bounds[next] !== undefined) {
-      end = bounds[next];
+    if (byNum[next] !== undefined) {
+      end = byNum[next];
       break;
     }
   }
@@ -298,13 +313,11 @@ export function extractKaisetsuForChoice(full, choiceIndex) {
   return slice || null;
 }
 
-/** 記述別切り出し。失敗時は解説全文をフォールバックとして返す */
+/** 記述別切り出し。失敗時は空（全文返却でUIが固まるのを防ぐ） */
 export function resolveKaisetsuForChoice(full, choiceIndex) {
   const perChoice = extractKaisetsuForChoice(full, choiceIndex);
   if (perChoice) return { text: perChoice, fallback: false };
-  const trimmed = (full || "").trim();
-  if (trimmed) return { text: trimmed, fallback: true };
-  return { text: "", fallback: false };
+  return { text: "", fallback: true };
 }
 
 export function lawEgovUrl(label) {

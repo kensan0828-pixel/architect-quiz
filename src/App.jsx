@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, startTransition } from "react";
 import Dashboard from "./components/Dashboard";
 import MockExam from "./components/MockExam";
-import { questionHistKey, extractHokiArticleRefs, resolveKaisetsuForChoice, lawEgovUrl } from "./utils";
+import { questionHistKey, extractHokiArticleRefs, extractKaisetsuForChoice, resolveKaisetsuForChoice, lawEgovUrl } from "./utils";
 
 // **text** をインライン <strong> にレンダリングするヘルパー
 function renderWithBold(text) {
@@ -596,7 +596,10 @@ export default function App() {
       ? orderIndices.map((i) => filtered[i])
       : baseQuestionList;
 
-  const flatFreezeKey = `${filterSubject}|${filterYear}|${filtered.map((x) => x.id).join(",")}|wr${rqWeakRound}`;
+  const flatFreezeKey = useMemo(
+    () => `${filterSubject}|${filterYear}|${filtered.map((x) => x.id).join(",")}|wr${rqWeakRound}`,
+    [filterSubject, filterYear, filtered, rqWeakRound],
+  );
   const rqWeakFlatUnits = useMemo(() => {
     if (!readQuestionFirst || !weakMode) return [];
     const idMap = new Map(filtered.map((qq) => [qq.id, qq]));
@@ -628,7 +631,10 @@ export default function App() {
       : shuffledOrder
         ? shuffledOrder.join("-")
         : "sorted";
-  const listSig = `${filterSubject}|${filterYear}|${orderKeyForListSig}|${filtered.map((x) => x.id).join(",")}`;
+  const listSig = useMemo(
+    () => `${filterSubject}|${filterYear}|${orderKeyForListSig}|${filtered.map((x) => x.id).join(",")}`,
+    [filterSubject, filterYear, orderKeyForListSig, filtered],
+  );
 
   useEffect(() => {
     if (sessionComplete) return;
@@ -1013,7 +1019,9 @@ export default function App() {
   const officialAnswerLabel = officialNums.join("・") || q.正答;
   const officialSeiExpected = (i) => getOfficialSeiExpectedForQuestion(q, i);
   const stepIdx = isRqFlatWeak ? qFlat.step : rqStep;
-  const rqKaisetsuResolved = resolveKaisetsuForChoice(q.解説 || "", stepIdx + 1);
+  const rqArticleHintText = (readQuestionFirst && rqShowArticles && q.科目 === HOKI_SUBJECT)
+    ? (extractKaisetsuForChoice(q.解説 || "", stepIdx + 1) || "")
+    : "";
   const rqFeedbackOk = !rqReview && rqItemExpl ? rqMarks[stepIdx] === officialSeiExpected(stepIdx) : null;
   const isCorrect = readQuestionFirst && rqReview
     ? [0, 1, 2, 3].every((i) => rqMarks[i] === officialSeiExpected(i))
@@ -1176,15 +1184,16 @@ export default function App() {
       saveRqWrongStreaks(streaks);
     }
 
-    const { text, fallback } = resolveKaisetsuForChoice(q.解説 || "", idx + 1);
+    const { text } = resolveKaisetsuForChoice(q.解説 || "", idx + 1);
     const display = text
-      ? (fallback ? `（記述別の切り出しに失敗したため、解説全文を表示しています）\n\n${text}` : text)
-      : "（Notionに解説が登録されていないか、読み取れませんでした。）";
-    setRqItemExpl(display);
-    setRqExplList((prev) => {
-      const n = [...prev];
-      n[idx] = display;
-      return n;
+      || "（Notionの解説から、この記述に対応する段落を切り出せませんでした。）";
+    startTransition(() => {
+      setRqItemExpl(display);
+      setRqExplList((prev) => {
+        const n = [...prev];
+        n[idx] = display;
+        return n;
+      });
     });
   }
 
@@ -1577,11 +1586,7 @@ export default function App() {
                 <span>{choices[stepIdx]}</span>
               </div>
               {rqShowArticles && q.科目 === HOKI_SUBJECT && rqItemExpl === null && (
-                <RqHokiArticleBlock
-                  text={rqKaisetsuResolved.text}
-                  hint
-                  articleFallback={rqKaisetsuResolved.fallback}
-                />
+                <RqHokiArticleBlock text={rqArticleHintText} hint />
               )}
               <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
                 <button
