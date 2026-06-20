@@ -77,7 +77,9 @@ function defaultHokiPrefix(law) {
 }
 
 function parseExcelArticleToken(token, defaultPrefix) {
-  let t = zenNumToHan(token).replace(/\s+/g, "").replace(/～|〜$/g, "");
+  const raw = zenNumToHan(token).replace(/\s+/g, "");
+  const isRange = /～|〜$/.test(raw);
+  let t = raw.replace(/～|〜$/g, "");
   if (!t) return null;
   let prefix = defaultPrefix;
   const pm = t.match(/^(法|令|規|省令)/);
@@ -87,7 +89,12 @@ function parseExcelArticleToken(token, defaultPrefix) {
   }
   const m = t.match(/^(\d+)条(?:の(\d+))?/);
   if (!m) return null;
-  return { prefix, base: parseInt(m[1], 10), no2: m[2] ? parseInt(m[2], 10) : null };
+  return {
+    prefix,
+    base: parseInt(m[1], 10),
+    no2: m[2] ? parseInt(m[2], 10) : null,
+    isRange,
+  };
 }
 
 function parseExcelArticleField(law, field) {
@@ -125,20 +132,59 @@ function articleSpecMatches(spec, base, no2) {
   return no2 == null;
 }
 
-/** 法令名＋条文番号からインデックス名を検索 */
-export function lookupHokiIndex(lawName, base, no2) {
+/** Excelの「令112条～」形式：当該条番号以降に該当 */
+function articleSpecMatchesRange(spec, base, no2) {
+  if (!spec.isRange) return false;
+  if (base < spec.base) return false;
+  if (spec.no2 != null) {
+    if (base > spec.base) return true;
+    return no2 != null && no2 >= spec.no2;
+  }
+  return base >= spec.base;
+}
+
+function rangeSpecSortKey(spec) {
+  return spec.base * 1000 + (spec.no2 ?? 0);
+}
+
+function pickBestRangeIndex(matches, contextText) {
+  if (matches.length === 0) return null;
+  const ctx = contextText ? zenNumToHan(String(contextText)) : "";
+  if (ctx) {
+    const textMatches = matches.filter((m) => ctx.includes(m.index));
+    if (textMatches.length > 0) {
+      return textMatches.reduce((best, m) => (!best || m.key > best.key ? m : best)).index;
+    }
+  }
+  return matches.reduce((best, m) => (!best || m.key > best.key ? m : best)).index;
+}
+
+/** 法令名＋条文番号からインデックス名を検索（contextText があれば解説内の語句で範囲照合を絞る） */
+export function lookupHokiIndex(lawName, base, no2, contextText = null) {
   if (!lawName || base == null) return null;
   const law = normalizeHokiLawName(lawName);
   let exactMatch = null;
+  const rangeMatches = [];
+
   for (const row of HOKI_INDEX_ROWS) {
     if (row.law !== law || row.specs.length === 0) continue;
     for (const spec of row.specs) {
+      if (spec.isRange) continue;
       if (!articleSpecMatches(spec, base, no2)) continue;
       if (spec.no2 != null) return row.index;
       if (!exactMatch) exactMatch = row.index;
     }
   }
-  return exactMatch;
+  if (exactMatch) return exactMatch;
+
+  for (const row of HOKI_INDEX_ROWS) {
+    if (row.law !== law || row.specs.length === 0) continue;
+    for (const spec of row.specs) {
+      if (!articleSpecMatchesRange(spec, base, no2)) continue;
+      rangeMatches.push({ index: row.index, key: rangeSpecSortKey(spec) });
+    }
+  }
+  return pickBestRangeIndex(rangeMatches, contextText);
 }
 
 export function parseLawArticleLabel(label) {
@@ -169,10 +215,10 @@ export function parseLawArticleLabel(label) {
   };
 }
 
-function enrichHokiRef(label) {
+function enrichHokiRef(label, contextText = null) {
   try {
     const { law, base, no2 } = parseLawArticleLabel(label);
-    const index = lookupHokiIndex(law, base, no2);
+    const index = lookupHokiIndex(law, base, no2, contextText);
     return index ? { label, index } : { label };
   } catch {
     return { label };
@@ -183,11 +229,11 @@ function zenNumToHan(s) {
   return s.replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0));
 }
 
-function pushHokiRef(seen, out, label) {
+function pushHokiRef(seen, out, label, contextText = null) {
   const normalized = zenNumToHan(label).replace(/\s+/g, "");
   if (!normalized || seen.has(normalized)) return;
   seen.add(normalized);
-  out.push(enrichHokiRef(normalized));
+  out.push(enrichHokiRef(normalized, contextText));
 }
 
 /** Notion解説テキストから条文番号らしき表記を抽出（学科Ⅲ一問一答用） */
@@ -202,7 +248,7 @@ export function extractHokiArticleRefs(text) {
 
   const push = (label) => {
     if (out.length >= MAX_REFS) return;
-    pushHokiRef(seen, out, label);
+    pushHokiRef(seen, out, label, raw);
   };
 
   const escaped = HOKI_LAW_NAMES.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
