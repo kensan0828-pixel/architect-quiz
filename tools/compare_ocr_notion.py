@@ -42,6 +42,8 @@ from ocr_to_notion import (  # noqa: E402
     YEAR_MAP,
     clean_explanation,
     find_notion_page,
+    iter_subject_dirs,
+    list_subject_images,
     notion_headers,
     ocr_page,
     split_by_question,
@@ -146,7 +148,7 @@ def load_or_ocr_subject(
         full_text = cache_file.read_text(encoding="utf-8")
         print(f"  [CACHE] {cache_file.name}")
     else:
-        pages = sorted(subject_dir.glob("page_*.jpg"))
+        pages = list_subject_images(subject_dir)
         if not pages:
             return {}
         if ocr_fn is None:
@@ -331,28 +333,21 @@ def main():
     notion_map = load_all_notion_explanations()
     print(f"[Notion] {len(notion_map)} 件読み込み")
 
-    for year_dir in sorted(BASE_DIR.iterdir()):
-        if not year_dir.is_dir():
-            continue
-        if args.year and year_dir.name.upper() != args.year.upper():
-            continue
-        for subject_dir in sorted(year_dir.iterdir()):
-            if not subject_dir.is_dir() or subject_dir.name not in SUBJECT_MAP:
-                continue
-            if args.subject and subject_dir.name != args.subject:
-                continue
-            process_subject(
-                year_dir.name,
-                subject_dir.name,
-                dry_run=args.dry_run,
-                fix=args.fix,
-                use_cache=args.use_cache,
-                force_ocr=args.force_ocr,
-                ocr_fn=ocr_fn,
-                ocr_interval_sec=ocr_interval_sec,
-                notion_map=notion_map,
-                report=report,
-            )
+    for year_folder, subject_folder, _ in iter_subject_dirs(
+        BASE_DIR, year=args.year, subject=args.subject
+    ):
+        process_subject(
+            year_folder,
+            subject_folder,
+            dry_run=args.dry_run,
+            fix=args.fix,
+            use_cache=args.use_cache,
+            force_ocr=args.force_ocr,
+            ocr_fn=ocr_fn,
+            ocr_interval_sec=ocr_interval_sec,
+            notion_map=notion_map,
+            report=report,
+        )
 
     REPORT_PATH.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"\n[REPORT] {REPORT_PATH}")

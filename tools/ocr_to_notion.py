@@ -39,7 +39,12 @@ load_dotenv()
 # 設定
 # ============================================================
 
-BASE_DIR = Path(r"C:\Users\Kentaro Oiwa\OneDrive\Desktop\architect-quiz\tools\sogo_image")
+SOGO_IMAGE_DIR = Path(r"C:\Users\Kentaro Oiwa\OneDrive\Desktop\architect-quiz\tools\sogo_image")
+PROBLEMS_DIR = SOGO_IMAGE_DIR / "01_problems"
+EXPLANATIONS_DIR = SOGO_IMAGE_DIR / "02_explanations"
+BASE_DIR = EXPLANATIONS_DIR  # 解説OCR用（後方互換）
+
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
 NOTION_DATABASE_ID = os.getenv("NOTION_DATABASE_ID")
@@ -200,6 +205,39 @@ def _join_lines(lines: list[str]) -> str:
     return re.sub(r'  +', ' ', joined)
 
 
+def list_subject_images(subject_dir: Path) -> list[Path]:
+    """科目フォルダ内のページ画像をページ順で返す（page_*.jpg 優先、なければ全画像）"""
+    pages = sorted(subject_dir.glob("page_*.jpg"))
+    if pages:
+        return pages
+    return sorted(
+        f for f in subject_dir.iterdir()
+        if f.is_file() and f.suffix.lower() in IMAGE_EXTENSIONS
+    )
+
+
+def iter_subject_dirs(
+    base_dir: Path,
+    *,
+    year: str | None = None,
+    subject: str | None = None,
+):
+    """base_dir 以下の 年度/科目 フォルダを走査する"""
+    if not base_dir.exists():
+        return
+    for year_dir in sorted(base_dir.iterdir()):
+        if not year_dir.is_dir():
+            continue
+        if year and year_dir.name.upper() != year.upper():
+            continue
+        for subject_dir in sorted(year_dir.iterdir()):
+            if not subject_dir.is_dir() or subject_dir.name not in SUBJECT_MAP:
+                continue
+            if subject and subject_dir.name != subject:
+                continue
+            yield year_dir.name, subject_dir.name, subject_dir
+
+
 # ============================================================
 # Notion 操作
 # ============================================================
@@ -230,24 +268,27 @@ def find_notion_page(year: str, subject: str, question_no: int) -> str | None:
     return results[0]["id"] if results else None
 
 
-def update_notion_explanation(page_id: str, explanation: str) -> None:
-    """
-    Notionの解説フィールドを上書き更新。
-    Notion rich_text は1要素あたり2000文字制限のため分割して送信。
-    """
+def _rich_text_payload(text: str) -> list[dict]:
+    if not text:
+        return [{"text": {"content": ""}}]
+    chunks = [text[i:i + 2000] for i in range(0, len(text), 2000)]
+    return [{"text": {"content": chunk}} for chunk in chunks]
+
+
+def update_notion_fields(page_id: str, fields: dict[str, str]) -> None:
+    """Notion の rich_text フィールドをまとめて上書き更新"""
     url = f"https://api.notion.com/v1/pages/{page_id}"
-
-    # 2000文字ごとに分割
-    chunks = [explanation[i:i + 2000] for i in range(0, len(explanation), 2000)]
-    rich_text = [{"text": {"content": chunk}} for chunk in chunks]
-
-    payload = {
-        "properties": {
-            "解説": {"rich_text": rich_text}
-        }
+    properties = {
+        name: {"rich_text": _rich_text_payload(value)}
+        for name, value in fields.items()
     }
-    resp = httpx.patch(url, headers=notion_headers(), json=payload, timeout=30)
+    resp = httpx.patch(url, headers=notion_headers(), json={"properties": properties}, timeout=30)
     resp.raise_for_status()
+
+
+def update_notion_explanation(page_id: str, explanation: str) -> None:
+    """Notionの解説フィールドを上書き更新"""
+    update_notion_fields(page_id, {"解説": explanation})
 
 
 # ============================================================
@@ -268,7 +309,7 @@ def process_subject(
     if not subject_dir.exists() or notion_subject is None or notion_year is None:
         return
 
-    pages = sorted(subject_dir.glob("page_*.jpg"))
+    pages = list_subject_images(subject_dir)
     if not pages:
         print(f"  ⚠️  画像が見つかりません: {subject_dir}")
         return
@@ -387,27 +428,16 @@ def main():
         print(f"[ERROR] sogo_image フォルダが見つかりません: {BASE_DIR}")
         return
 
-    for year_dir in sorted(BASE_DIR.iterdir()):
-        if not year_dir.is_dir():
-            continue
-        if args.year and year_dir.name.upper() != args.year.upper():
-            continue
-
-        for subject_dir in sorted(year_dir.iterdir()):
-            if not subject_dir.is_dir():
-                continue
-            if args.subject and subject_dir.name != args.subject:
-                continue
-            if subject_dir.name not in SUBJECT_MAP:
-                continue
-
-            process_subject(
-                year_folder=year_dir.name,
-                subject_folder=subject_dir.name,
-                dry_run=args.dry_run,
-                save_ocr=args.save_ocr,
-                client=client,
-            )
+    for year_folder, subject_folder, _ in iter_subject_dirs(
+        BASE_DIR, year=args.year, subject=args.subject
+    ):
+        process_subject(
+            year_folder=year_folder,
+            subject_folder=subject_folder,
+            dry_run=args.dry_run,
+            save_ocr=args.save_ocr,
+            client=client,
+        )
 
     print("\n✅ 全処理完了")
 

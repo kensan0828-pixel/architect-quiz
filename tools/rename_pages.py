@@ -1,31 +1,31 @@
 """
 rename_pages.py
 ===============
-sogo_image/ 以下の年度×科目フォルダ内のJPGファイルを
+sogo_image/01_problems または 02_explanations 以下の年度×科目フォルダ内のJPGファイルを
 日時順（ファイル名昇順）に page_001.jpg 形式へ一括リネームする。
 
 使い方:
   # まず確認（ファイルは変更しない）
-  python rename_pages.py --dry-run
+  python tools/rename_pages.py --dry-run
 
-  # 問題なければ本番実行
-  python rename_pages.py
+  # 問題画像のみ
+  python tools/rename_pages.py --category problems
+
+  # 解説画像のみ
+  python tools/rename_pages.py --category explanations
 """
 
-import os
-import sys
 import argparse
+import sys
 from pathlib import Path
 
-# ============================================================
-# 設定
-# ============================================================
-
-# sogo_image フォルダのパス（環境に合わせて変更）
-BASE_DIR = Path(r"C:\Users\Kentaro Oiwa\OneDrive\Desktop\architect-quiz\tools\sogo_image")
-
-# 対象拡張子（小文字・大文字両対応）
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
+from ocr_to_notion import (
+    EXPLANATIONS_DIR,
+    IMAGE_EXTENSIONS,
+    PROBLEMS_DIR,
+    SOGO_IMAGE_DIR,
+    iter_subject_dirs,
+)
 
 # ============================================================
 # メイン処理
@@ -36,7 +36,6 @@ def rename_in_folder(folder: Path, dry_run: bool) -> tuple[int, int]:
     フォルダ内の画像ファイルを日時順にソートして page_XXX.jpg にリネーム。
     Returns: (処理件数, スキップ件数)
     """
-    # 対象ファイルを取得してファイル名昇順でソート
     files = sorted(
         [f for f in folder.iterdir()
          if f.is_file() and f.suffix.lower() in IMAGE_EXTENSIONS],
@@ -68,38 +67,49 @@ def rename_in_folder(folder: Path, dry_run: bool) -> tuple[int, int]:
     return processed, skipped
 
 
+def category_dirs(category: str) -> list[Path]:
+    if category == "problems":
+        return [PROBLEMS_DIR]
+    if category == "explanations":
+        return [EXPLANATIONS_DIR]
+    return [PROBLEMS_DIR, EXPLANATIONS_DIR]
+
+
 def main():
     parser = argparse.ArgumentParser(description="sogo_image ページ連番リネームツール")
     parser.add_argument(
         "--dry-run", action="store_true",
         help="ファイルを実際には変更せず確認のみ行う"
     )
+    parser.add_argument(
+        "--category", choices=["problems", "explanations", "both"], default="both",
+        help="対象カテゴリ（default: both）"
+    )
     args = parser.parse_args()
 
-    if not BASE_DIR.exists():
-        print(f"[ERROR] フォルダが見つかりません: {BASE_DIR}")
+    if not SOGO_IMAGE_DIR.exists():
+        print(f"[ERROR] フォルダが見つかりません: {SOGO_IMAGE_DIR}")
         sys.exit(1)
+
+    cat = "both" if args.category == "both" else args.category
+    targets = category_dirs(cat)
 
     mode = "【ドライラン】" if args.dry_run else "【本番実行】"
     print(f"\n{mode} リネーム処理を開始します")
-    print(f"対象フォルダ: {BASE_DIR}\n")
+    print(f"対象: {', '.join(str(d) for d in targets)}\n")
     print("=" * 60)
 
     total_processed = 0
     total_skipped = 0
     folder_count = 0
 
-    # 年度フォルダ（R1〜R7 など）を昇順で走査
-    for year_dir in sorted(BASE_DIR.iterdir()):
-        if not year_dir.is_dir():
+    for base_dir in targets:
+        if not base_dir.exists():
+            print(f"[WARN] スキップ（存在しません）: {base_dir}")
             continue
-
-        # 科目フォルダ（1_keikaku など）を昇順で走査
-        for subject_dir in sorted(year_dir.iterdir()):
-            if not subject_dir.is_dir():
-                continue
-
-            label = f"{year_dir.name}/{subject_dir.name}"
+        print(f"\n## {base_dir.name}")
+        for year_folder, subject_folder, subject_dir in iter_subject_dirs(base_dir):
+            label = f"{base_dir.name}/{year_folder}/{subject_folder}"
             print(f"\n📁 {label}")
 
             p, s = rename_in_folder(subject_dir, dry_run=args.dry_run)
