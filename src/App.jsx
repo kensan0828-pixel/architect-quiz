@@ -35,7 +35,8 @@ function normalizeChoiceAnswers(ans) {
 function isNegativeAnswerChoiceQuestion(problemText) {
   const t = problemText || "";
   return /(?:誤って|誤り|誤っている|不正確|不適切|不適当|正しくない|妥当でない|当てはまらない|適当でない)(?:もの|のは|を|に)/i.test(t)
-    || /不適当なもの|不適切なもの|誤っているもの|正しくないもの|妥当でないもの/i.test(t);
+    || /不適当なもの|不適切なもの|誤っているもの|正しくないもの|妥当でないもの/i.test(t)
+    || /適合しない(?:もの|記述|のは)?/i.test(t);
 }
 
 const LS_RQ_RESUME = "architect_quiz_rq_resume";
